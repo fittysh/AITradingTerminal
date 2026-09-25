@@ -1,0 +1,17 @@
+# secrets
+.env
+
+# runtime data (paper account, journals, reports, generated dashboard, replays, caches)
+state/
+journal/
+reports/
+cache/
+sim/
+replay/
+dashboard/index.html
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
