@@ -1,5 +1,10 @@
 # Trading Framework v5: template to fill in
 
+> **Status (2026-11-09):** v5 was adopted as an update of v4 (candle 2/3 closure, the series-close entry
+> candle and the new journal); see [FRAMEWORK.md](FRAMEWORK.md). This template stays as the worksheet
+> for what is still open: the volume / open interest / funding requirements (R2–R4) and the rows marked
+> **NEW**. The "v4" column below still describes the unchanged parts.
+
 Fill every `___` and hand it back; I'll rebuild the bot to match it and test it against v4 before it
 trades. The **v4** column shows what the bot does today, so you can keep a value by copying it.
 Rows marked **NEW** are gaps the review below found: v4 has no rule for them. Examples are in

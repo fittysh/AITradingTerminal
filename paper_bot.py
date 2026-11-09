@@ -173,6 +173,7 @@ def open_position(setup: dict, qty: float, fill: float, fee: float, now_ms: int,
     return {
         "id": f"{setup['symbol']}-{now_ms}", "symbol": setup["symbol"], "direction": setup["direction"], "dir": d,
         "tier": setup["tier"], "tag": setup["tag"], "family": setup["family"], "trigger": setup["trigger"],
+        "closure": setup.get("closure", ""), "entry_kind": setup.get("entry_kind", ""), "fvg": bool(setup.get("fvg")),
         "setup_id": setup["setup_id"], "struct_tf": setup["struct_tf"], "entry_tf": setup["entry_tf"],
         "mode": mode, "opened_at": now_ms, "entry": fill, "qty": qty, "qty_open": qty, "qty_step": qty_step,
         "initial_stop": stop, "stop": stop, "stop_kind": "stop", "target": target, "dol": dol,
@@ -183,7 +184,8 @@ def open_position(setup: dict, qty: float, fill: float, fee: float, now_ms: int,
         "fills": [{"ts": now_ms, "kind": "entry", "qty": qty, "price": fill, "pnl": 0.0, "fee": fee}],
         "order": order or {},
         "setup": {k: setup.get(k) for k in ("status", "bias", "structure", "rr", "entry", "target", "raid", "mss",
-                                            "range", "poi", "confirm", "checklist", "dol_kind", "risk_pct")},
+                                            "range", "poi", "confirm", "checklist", "dol_kind", "risk_pct",
+                                            "candle", "series")},
     }
 
 

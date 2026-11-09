@@ -60,6 +60,7 @@ def exchange_trades(client, state: dict, start: int, end: int) -> List[dict]:
         risk = (match or {}).get("risk_usd") or pb.RISK_PER_TRADE
         out.append({"symbol": sym, "direction": r.get("holdSide", "?"), "tag": (match or {}).get("tag", "unmatched"),
                     "tier": (match or {}).get("tier", "?"), "family": (match or {}).get("family", "?"),
+                    "closure": (match or {}).get("closure", "?"), "entry_kind": (match or {}).get("entry_kind", "?"),
                     "trigger": (match or {}).get("trigger", "?"), "opened_at": opened_at, "closed_at": closed_at,
                     "entry": float(r.get("openAvgPrice") or 0), "exit_price": float(r.get("closeAvgPrice") or 0),
                     "qty": float(r.get("closeTotalPos") or 0), "gross_pnl": gross, "funding": funding,
@@ -85,7 +86,7 @@ def build(state: dict, start: int, end: int, now: int, mode: str, label: str,
                     "equity": bal + unreal},
         "realized_window": pb.realized_between(state, start, end),
         "stats": pb.trade_stats(trades),
-        "by": {k: pb.breakdown(trades, k) for k in ("family", "tier", "trigger", "direction")},
+        "by": {k: pb.breakdown(trades, k) for k in ("family", "tier", "trigger", "closure", "entry_kind", "direction")},
         "trades": [_row(t) for t in trades],
         "open": [{"symbol": p["symbol"], "direction": p["direction"], "tag": p["tag"], "entry": p["entry"],
                   "stop": p["stop"], "stop_kind": p["stop_kind"], "target": p["target"], "price": p.get("last_price"),
@@ -303,7 +304,7 @@ def to_pdf(rep: dict, path: Path) -> Path:
         for t in rep["trades"]:
             netc = pos_c if t["net"] > 0 else neg_c if t["net"] < 0 else ink
             need(12)
-            vals = [tu.fmt(t["closed_at"], "%m-%d %H:%M"), t["symbol"][:11], t["direction"], t["tag"][:16], t["reason"],
+            vals = [tu.fmt(t["closed_at"], "%m-%d %H:%M"), t["symbol"][:11], t["direction"], t["tag"][:18], t["reason"],
                     f"{t['r']:+.2f}", f"{-t['fees']:+.2f}", f"{t['funding']:+.2f}", f"{t['net']:+.2f}"]
             x = M
             for i, ((name, w, al), v) in enumerate(zip(cols, vals)):
@@ -315,8 +316,8 @@ def to_pdf(rep: dict, path: Path) -> Path:
         doc.text(M, state["y"], "No trades closed in this window.", 8.5, "F1", mute)
         state["y"] -= 12
 
-    heading("By setup family / tier / trigger")
-    for key in ("family", "tier", "trigger"):
+    heading("By setup family / tier / trigger / closure / entry")
+    for key in ("family", "tier", "trigger", "closure", "entry_kind"):
         for name, b in rep["by"][key].items():
             need(12)
             wr = pct(b["win_rate"], 1, False) if b["win_rate"] is not None else "-"
@@ -331,7 +332,7 @@ def to_pdf(rep: dict, path: Path) -> Path:
     if rep["open"]:
         for p in rep["open"]:
             need(12)
-            doc.text(M, state["y"], f"{p['symbol']:<12} {p['direction']:<5} {p['tag']:<16} entry {px(p['entry']):>11}  stop "
+            doc.text(M, state["y"], f"{p['symbol']:<12} {p['direction']:<5} {p['tag']:<18} entry {px(p['entry']):>11}  stop "
                                     f"{px(p['stop']):>11} ({p['stop_kind']:<9}) R {p['r']:+.2f}  age {p['age_h']:.1f}h",
                      7.5, "F3", ink)
             state["y"] -= 11

@@ -146,7 +146,7 @@ def print_status(snap: dict, out=None) -> None:
     for p in snap["positions"]:
         bar = "".join(color(ch, {"pos": POS, "neg": NEG, "dim": DIM, "ink2": "0"}[role]) if ch.strip() else ch
                       for ch, role in ladder_cells(p, 34, G))
-        print(f"  {p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<16} {sgn(rmult(p['r_now']), p['r_now']):>8}  "
+        print(f"  {p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<18} {sgn(rmult(p['r_now']), p['r_now']):>8}  "
               f"{bar}  stop {px(p['stop'])} ({p['stop_kind']}) · age {p['age_h']:.1f}h", file=out)
     print(file=out)
     sig = snap.get("signals") or {}
@@ -400,7 +400,7 @@ class App:
         for p in s["positions"]:
             if y > top + h - 8:
                 break
-            head = f"{p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<17}"
+            head = f"{p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<18}"
             self.put(y, 1, head, curses.A_BOLD)
             self.put(y, 1 + len(head), f"{rmult(p['r_now']):>7} {usd(p['unreal'], True):>8}", self.sgn(p["r_now"]))
             self.ladder(y + 1, 3, p, max(20, left_w - 6))
@@ -411,14 +411,15 @@ class App:
             self.section(top, right_x, "Signals", right_w, f"scan {tu.hm(sig.get('generated_at'))}" if sig else "no scan yet")
             rows = [[x["symbol"], x["direction"][0].upper(), x["tag"], x["status"], f"{x['rr']:.2f}"] for x in listed[:10]]
             cols = [[curses.A_BOLD, 0, 0, self.c("acc") if x["status"] == "signal" else self.c("ink2"), 0] for x in listed[:10]]
-            self.table(top + 1, right_x, 11, right_w, [("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 16, "l"),
+            self.table(top + 1, right_x, 11, right_w, [("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 18, "l"),
                                                          ("STATUS", 7, "l"), ("RR", 5, "r")], rows, colors=cols)
             f = sig.get("funnel") or {}
             yy = top + 13
             self.section(yy, right_x, "Funnel", right_w, f"{f.get('universe', 0)} coins")
             maxv = max(1, f.get("universe", 1))
             for i, (k, lab) in enumerate((("context", "context"), ("trigger", "raid/CISD"), ("shift", "MSS"),
-                                          ("armed", "POI armed"), ("in-zone", "in-zone"), ("signal", "signal"))):
+                                          ("closure", "C2/C3"), ("armed", "zone armed"), ("in-zone", "in-zone"),
+                                          ("signal", "signal"))):
                 v = f.get(k, 0)
                 bw = int((right_w - 18) * v / maxv)
                 self.put(yy + 1 + i, right_x, f"{lab:<10}", self.c("ink2"))
@@ -446,7 +447,7 @@ class App:
                 break
             mark = "▶ " if (i == self.sel[1] and self.G.ok == "✓") else "> " if i == self.sel[1] else "  "
             self.put(y, 0, mark, self.c("acc"))
-            self.put(y, 2, f"{p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<17} {p['tier']} {p['struct_tf']}→{p['entry_tf']}", curses.A_BOLD)
+            self.put(y, 2, f"{p['symbol']:<12} {p['direction'].upper():<5} {p['tag']:<18} {p['tier']} {p['struct_tf']}→{p['entry_tf']}", curses.A_BOLD)
             self.put(y, W - 22, f"{rmult(p['r_now']):>8} {usd(p['unreal'], True):>10}", self.sgn(p["r_now"]))
             self.ladder(y + 1, 4, p, W - 10)
             now = s["meta"]["generated_at"]
@@ -472,7 +473,7 @@ class App:
         self.section(top, 1, "Setups", list_w, f"{len(sig.get('signals') or [])} signal · {len(sig.get('watch') or [])} in-zone · {len(s.get('armed') or [])} armed")
         rows = [[x["symbol"], x["direction"][0].upper(), x["tag"], x["status"]] for x in items]
         cols = [[curses.A_BOLD, 0, 0, self.c("acc") if x["status"] == "signal" else self.c("ink2") if x["status"] == "in-zone" else self.c("dim")] for x in items]
-        self.table(top + 1, 1, h - 1, list_w, [("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 17, "l"), ("STATUS", 8, "l")],
+        self.table(top + 1, 1, h - 1, list_w, [("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 18, "l"), ("STATUS", 8, "l")],
                    rows, tab_i=2, colors=cols)
         if not items:
             return
@@ -606,7 +607,7 @@ class App:
         rows = [[tu.fmt(t["closed_at"], "%m-%d %H:%M"), t["symbol"], t["direction"][0].upper(), t["tag"], t["exit_reason"],
                  f"{t['hold_h']:.1f}h", rmult(t["r_mult"]), usd(t["net_pnl"], True)] for t in trades]
         cols = [[0, curses.A_BOLD, 0, 0, 0, 0, self.sgn(t["r_mult"]), self.sgn(t["net_pnl"])] for t in trades]
-        self.table(top + 3, 1, h - 3, W - 2, [("CLOSED", 11, "l"), ("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 17, "l"),
+        self.table(top + 3, 1, h - 3, W - 2, [("CLOSED", 11, "l"), ("SYMBOL", 11, "l"), ("D", 1, "l"), ("SETUP", 18, "l"),
                                               ("EXIT", 9, "l"), ("HOLD", 6, "r"), ("R", 7, "r"), ("NET", 9, "r")], rows, tab_i=6, colors=cols)
 
     def text_view(self, top: int, h: int, W: int, lines: List[str], tab_i: int, follow: bool = False) -> None:

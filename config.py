@@ -62,7 +62,7 @@ EDGE_MIN_TRADES = _env("EDGE_MIN_TRADES", 30, int)
 EDGE_MIN_PROFIT_FACTOR = _env("EDGE_MIN_PROFIT_FACTOR", 1.2, float)
 
 ACCOUNT_SIZE = _env("ACCOUNT_SIZE", 600.0, float)
-ENGINE = "v4 sweep-reversal"
+ENGINE = "v5 sweep-reversal · C2/C3 closure"
 EXCHANGE = "Bitget USDT-M Futures"
 
 # --- Bitget ----------------------------------------------------------------------------------------

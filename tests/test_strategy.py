@@ -1,4 +1,4 @@
-"""Engine tests: every primitive of the v4 sequence plus full evaluate() runs on hand-built scenarios."""
+"""Engine tests: every primitive of the v5 sequence plus full evaluate() runs on hand-built scenarios."""
 import os
 import sys
 import unittest
@@ -114,12 +114,56 @@ class Primitives(unittest.TestCase):
         self.assertAlmostEqual(stop, 104.104)
 
 
+def r_stage(S, E, D, now, price=101.0):
+    return st.evaluate("TESTUSDT", getter(S, E, D), price, now).stage
+
+
+class Closure(unittest.TestCase):
+    """Step 5 on hand-built candle pairs (C1 = index 0)."""
+
+    def c(self, *rows):
+        return bars(rows, T0, H4)
+
+    def test_c2_closure(self):
+        c = self.c((10, 10.5, 9.0, 9.5), (9.5, 9.8, 8.5, 9.2))          # takes 9.0, closes 9.2
+        cl, _ = st.candle_closure(c, st.LONG, 1)
+        self.assertEqual((cl["kind"], cl["level"], cl["close"]), ("C2", 9.0, 1))
+
+    def test_c3_closure(self):
+        c = self.c((10, 10.5, 9.0, 9.5), (9.5, 9.6, 8.5, 8.8), (8.8, 9.6, 8.7, 9.4))
+        cl, _ = st.candle_closure(c, st.LONG, 1)
+        self.assertEqual((cl["kind"], cl["close"]), ("C3", 2))
+
+    def test_waits_for_c3(self):
+        cl, why = st.candle_closure(self.c((10, 10.5, 9.0, 9.5), (9.5, 9.6, 8.5, 8.8)), st.LONG, 1)
+        self.assertIsNone(cl)
+        self.assertIn("waiting for C3", why)
+
+    def test_continuation_is_rejected(self):
+        c = self.c((10, 10.5, 9.0, 9.5), (9.5, 9.6, 8.5, 8.8), (8.8, 8.95, 8.6, 8.7))
+        cl, why = st.candle_closure(c, st.LONG, 1)
+        self.assertIsNone(cl)
+        self.assertIn("continuation", why)
+
+    def test_must_trade_through_c1(self):
+        cl, why = st.candle_closure(self.c((10, 10.5, 9.0, 9.5), (9.5, 9.8, 9.1, 9.7)), st.LONG, 1)
+        self.assertIsNone(cl)
+
+    def test_short_mirror(self):
+        c = mirror(self.c((10, 10.5, 9.0, 9.5), (9.5, 9.8, 8.5, 9.2)), 20.0)
+        cl, _ = st.candle_closure(c, st.SHORT, 1)
+        self.assertEqual((cl["kind"], cl["level"]), ("C2", 11.0))
+
+
 class Evaluate(unittest.TestCase):
     def test_long_signal(self):
         S, E, D, now, price = long_scenario()
         r = st.evaluate("TESTUSDT", getter(S, E, D), price, now)
         s = r.setup
-        self.assertEqual((r.stage, s.status, s.direction, s.tier, s.tag), (6, "signal", "long", "T1", "sweep-T1-raid"))
+        self.assertEqual((r.stage, s.status, s.direction, s.tier, s.tag),
+                         (st.STAGE["signal"], "signal", "long", "T1", "sweep-T1-raid-C3"))
+        self.assertEqual((s.closure, s.entry_kind, s.confirm["level"]), ("C3", "close", 98.6))
+        self.assertEqual([c["step"] for c in s.checklist], [1, 2, 3, 4, 5, 6, 7])
         self.assertAlmostEqual(s.stop, 94.0 * 0.999)
         self.assertAlmostEqual(s.target, 98.3 + 2 * (98.3 - 93.906), places=6)   # DOL 104.5 < 2R → 1:2 floor
         self.assertEqual(s.rr, 2.0)
@@ -131,7 +175,7 @@ class Evaluate(unittest.TestCase):
         S, E, D, now, price = long_scenario()
         r = st.evaluate("TESTUSDT", getter(mirror(S), mirror(E), mirror(D)), 200 - price, now)
         s = r.setup
-        self.assertEqual((s.status, s.direction, s.tag), ("signal", "short", "sweep-T1-raid"))
+        self.assertEqual((s.status, s.direction, s.tag), ("signal", "short", "sweep-T1-raid-C3"))
         self.assertAlmostEqual(s.stop, 106.0 * 1.001)
         self.assertAlmostEqual((s.poi["lo"], s.poi["hi"])[0], 200 - 98.6)
         self.assertGreaterEqual(s.rr, 2.0)
@@ -139,29 +183,91 @@ class Evaluate(unittest.TestCase):
     def test_cisd_signal(self):
         S, E, D, now, price = cisd_scenario()
         s = st.evaluate("CISDUSDT", getter(S, E, D), price, now).setup
-        self.assertEqual((s.status, s.tag, s.raid["kind"]), ("signal", "sweep-T1-cisd", "cisd"))
+        self.assertEqual((s.status, s.tag, s.raid["kind"]), ("signal", "sweep-T1-cisd-C3", "cisd"))
         self.assertEqual(s.target, 106.5)                           # the DOL, already ≥ 2R
         self.assertEqual(s.dol_kind, "swing high")
 
-    def test_in_zone_waits_for_confirmation(self):
+    def test_in_zone_waits_for_the_series_close(self):
         S, E, D, now, price = long_scenario()
-        s = st.evaluate("TESTUSDT", getter(S, E[:-1], D), price, now).setup
+        s = st.evaluate("TESTUSDT", getter(S, E[:-1], D), price, now - M15).setup   # before the last candle
         self.assertEqual(s.status, "in-zone")
-        self.assertFalse(s.checklist[5]["ok"])
+        self.assertFalse(s.checklist[6]["ok"])
+        self.assertIn("close above the series at 98.6", s.checklist[6]["detail"])
 
-    def test_wick_candle_is_not_a_confirmation(self):
+    def test_close_below_the_series_is_not_an_entry(self):
         S, E, D, now, price = long_scenario()
-        wick = E[:-1] + [Candle(E[-1].ts, 97.95, 98.45, 97.5, 98.05, 1.0)]   # body 10% of range
-        self.assertEqual(st.evaluate("T", getter(S, wick, D), price, now).setup.status, "in-zone")
+        solid = E[:-1] + [Candle(E[-1].ts, 97.95, 98.5, 97.9, 98.45, 1.0)]   # 83% body, but under 98.6
+        self.assertEqual(st.evaluate("T", getter(S, solid, D), price, now).setup.status, "in-zone")
 
-    def test_stale_confirmation_ignored(self):
+    def test_wick_candle_through_the_series_is_not_an_entry(self):
         S, E, D, now, price = long_scenario()
-        self.assertEqual(st.evaluate("T", getter(S, E, D), price, now + 40 * tu.MIN).setup.status, "in-zone")
+        wick = E[:-1] + [Candle(E[-1].ts, 98.5, 98.9, 97.5, 98.65, 1.0)]     # closes above, body 11%
+        s = st.evaluate("T", getter(S, wick, D), price, now).setup
+        self.assertEqual(s.status, "in-zone")
+        self.assertIn("spent (body 11% < 50%)", s.checklist[6]["detail"])
 
-    def test_only_the_latest_entry_candle_confirms(self):
+    def test_series_close_counts_for_30_minutes(self):
         S, E, D, now, price = long_scenario()
-        faded = E + [Candle(E[-1].ts + M15, 98.4, 98.45, 98.1, 98.2, 1.0)]    # newer bearish candle
-        self.assertEqual(st.evaluate("T", getter(S, faded, D), price, now + M15).setup.status, "in-zone")
+        later = E + [Candle(E[-1].ts + M15, 98.7, 98.8, 98.65, 98.75, 1.0)]  # +15m, still above 98.6
+        self.assertEqual(st.evaluate("T", getter(S, later, D), price, now + M15).setup.status, "signal")
+        s = st.evaluate("T", getter(S, E, D), price, now + 40 * tu.MIN).setup   # 45 min old → spent
+        self.assertEqual(s.status, "in-zone")
+
+    def test_shallow_pullback_after_the_close_keeps_the_entry(self):
+        S, E, D, now, price = long_scenario()
+        red = E + [Candle(E[-1].ts + M15, 98.7, 98.72, 98.55, 98.62, 1.0)]   # red, dips into the FVG top
+        s = st.evaluate("T", getter(S, red, D), price, now + M15).setup
+        self.assertEqual((s.status, s.confirm["c"]), ("signal", 98.7))
+
+    def test_close_back_through_the_series_cancels(self):
+        S, E, D, now, price = long_scenario()
+        back = E + [Candle(E[-1].ts + M15, 98.7, 98.75, 98.2, 98.3, 1.0)]    # closes back under 98.6
+        self.assertEqual(st.evaluate("T", getter(S, back, D), price, now + M15).setup.status, "in-zone")
+
+    def test_series_close_after_a_c2_candle_like_the_chart(self):
+        """The annotated chart: 2 down-closes into the zone, a C2 candle sweeps lower and closes back up,
+        inner candles stay under the series top, then a body closes above it → entry."""
+        S, _, D, now, price = long_scenario()
+        rows = [(98.9, 99.0, 98.85, 98.95),                                   # last up-close before the series
+                (98.55, 98.6, 98.2, 98.25), (98.25, 98.3, 97.9, 97.95),        # series: top of bodies 98.55
+                (97.95, 98.2, 97.6, 98.15),                                   # C2: new low 97.6, closes up
+                (98.15, 98.35, 98.1, 98.3), (98.3, 98.45, 98.25, 98.4),       # inner candles under 98.55
+                (98.4, 98.95, 98.35, 98.9)]                                   # close above the series → entry
+        E = bars(rows, now - 5 * tu.MIN - len(rows) * M15, M15)
+        s = st.evaluate("T", getter(S, E, D), price, now).setup
+        self.assertEqual((s.status, s.entry_kind, s.confirm["level"], s.series["bars"]), ("signal", "close", 98.55, 2))
+
+    def test_fvg_retest_is_a_second_entry(self):
+        """Series close 45 min ago left a 15m FVG; a solid candle retests it now → +FVG entry."""
+        S, _, D, now, price = long_scenario()
+        rows = [(98.6, 98.65, 98.2, 98.25), (98.25, 98.3, 97.8, 97.85),       # series into the zone, top 98.6
+                (97.85, 98.9, 97.8, 98.85),                                   # close above it (45 min ago)
+                (98.85, 99.6, 98.8, 99.5),                                    # displacement: FVG 98.9–99.2
+                (99.5, 99.7, 99.2, 99.3),
+                (99.1, 99.45, 99.05, 99.4)]                                   # retest of the FVG, solid close
+        E = bars(rows, now - 5 * tu.MIN - len(rows) * M15, M15)
+        s = st.evaluate("T", getter(S, E, D), price, now).setup
+        self.assertEqual((s.status, s.entry_kind, s.fvg), ("signal", "fvg", True))
+        self.assertEqual(s.confirm["fvg"], [98.9, 99.2])
+        self.assertIn("+FVG", s.checklist[6]["detail"])
+
+    def test_c2_closure(self):
+        tail = list(LONG_TAIL)
+        tail[15] = (97.2, 97.4, 94.0, 97.0)                     # raid candle closes back above C1's low 96.8
+        S = bars(filler() + tail, T0, H4)
+        _, E, D, now, price = long_scenario()
+        s = st.evaluate("C2USDT", getter(S, E, D), price, now).setup
+        self.assertEqual((s.status, s.closure, s.tag), ("signal", "C2", "sweep-T1-raid-C2"))
+        self.assertIn("C2 closure", s.checklist[4]["detail"])
+
+    def test_no_c2_or_c3_closure_means_no_long(self):
+        tail = list(LONG_TAIL)
+        tail[16] = (96.0, 96.7, 95.8, 96.5)                     # C3 also closes under C1's low 96.8
+        S = bars(filler() + tail, T0, H4)
+        _, E, D, now, price = long_scenario()
+        r = st.evaluate("NOUSDT", getter(S, E, D), price, now)
+        self.assertTrue(r.setup is None or r.setup.direction == "short")
+        self.assertTrue(any("no candle closure" in n and "continuation" in n for n in r.notes), r.notes)
 
     def test_armed_when_price_still_in_premium(self):
         S, E, D, now, _ = long_scenario()
@@ -169,12 +275,14 @@ class Evaluate(unittest.TestCase):
         self.assertEqual(s.status, "armed")
         self.assertEqual(s.entry, 98.6)                              # first touch of the FVG
         self.assertFalse(s.checklist[3]["ok"])
+        self.assertEqual(r_stage(S, E, D, now), st.STAGE["armed"])
 
     def test_order_block_entry_targets_the_dol(self):
         S, E, D, now, _ = long_scenario()
-        e = E[:-1] + [Candle(E[-1].ts, 95.2, 95.7, 95.1, 95.6, 1.0)]
+        e = bars([(96.6, 96.7, 96.0, 96.1), (96.1, 96.2, 95.2, 95.3),         # series through the FVG into the OB
+                  (95.3, 96.8, 95.2, 96.7)], now - 5 * tu.MIN - 3 * M15, M15)   # closes above the series top 96.6
         s = st.evaluate("TESTUSDT", getter(S, e, D), 95.5, now).setup
-        self.assertEqual((s.status, s.family, s.tag), ("signal", "OB", "OB-T1-raid"))
+        self.assertEqual((s.status, s.family, s.tag), ("signal", "OB", "OB-T1-raid-C3"))
         self.assertEqual(s.target, 104.5)                            # DOL beyond 2R → target is the DOL
         self.assertGreater(s.rr, 5)
 
@@ -186,7 +294,7 @@ class Evaluate(unittest.TestCase):
         E = bars([(101.0, 101.1, 100.8, 100.9), (100.9, 101.5, 100.85, 101.4)], now - 5 * tu.MIN - 2 * M15, M15)
         _, _, D, _, _ = long_scenario()
         s = st.evaluate("UNIUSDT", getter(S, E, D), 101.2, now).setup
-        self.assertEqual((s.status, s.family, s.tag), ("signal", "unicorn", "unicorn-T1-raid"))
+        self.assertEqual((s.status, s.family, s.tag), ("signal", "unicorn", "unicorn-T1-raid-C3"))
         self.assertEqual((s.poi["lo"], s.poi["hi"]), (100.5, 102.0))
 
     def test_context_blocks_longs_in_downtrend(self):

@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import journal  # noqa: E402
 import paper_bot as pb  # noqa: E402
 import run_bot  # noqa: E402
 import timeutil as tu  # noqa: E402
@@ -49,6 +50,29 @@ class Replay(unittest.TestCase):
         have = {p.stem for p in (self.home / "journal").glob("*.md")}
         self.assertTrue(days <= have, days - have)
 
+    def test_journal_follows_the_design(self):
+        seen_rows = 0
+        for md in (self.home / "journal").glob("*.md"):
+            page = md.with_suffix(".html").read_text()
+            for part in ("Crypto Trading Journal", "At a glance", "Total P&amp;L ($)", "Entries", "rows filled in",
+                         "<th>Date</th><th>Ticker</th><th>Side</th><th>Size</th>"):
+                if part.startswith("<th>") and "No trades closed" in page:
+                    continue
+                self.assertIn(part, page, md.stem)
+            v = journal.day_view(self.store, self.state, END, "paper", tu.parse_date(md.stem) + 12 * tu.HOUR)
+            start, end = tu.market_day(tu.parse_date(md.stem) + 12 * tu.HOUR)
+            closed = [t for t in self.state["closed"] if start <= t["closed_at"] < end]
+            self.assertEqual(v["entries"], len(closed))
+            self.assertAlmostEqual(v["total_pnl"], sum(t["net_pnl"] for t in closed), places=9)
+            self.assertEqual([r["ticker"] for r in v["rows"]],
+                             [t["symbol"] for t in sorted(closed, key=lambda t: (t["opened_at"], t["closed_at"]), reverse=True)])
+            for r, t in zip(v["rows"], sorted(closed, key=lambda t: (t["opened_at"], t["closed_at"]), reverse=True)):
+                gross = sum(f["pnl"] for f in t["fills"] if f["kind"] in ("tp1", "exit"))
+                self.assertAlmostEqual(t["dir"] * (r["exit"] - r["entry"]) * r["size"], gross, places=6,
+                                       msg="exit is the size-weighted average of the exit fills")
+            seen_rows += len(v["rows"])
+        self.assertGreater(seen_rows, 0)
+
     def test_every_entry_was_listed_by_the_signal_scan(self):
         listed = None
         for e in self.events:
@@ -86,7 +110,12 @@ class Replay(unittest.TestCase):
 
     def test_tags_follow_the_framework_families(self):
         for t in self.state["closed"] + self.state["positions"]:
-            self.assertRegex(t["tag"], r"^(sweep|OB|unicorn)-T[12]-(raid|cisd)$")
+            self.assertRegex(t["tag"], r"^(sweep|OB|unicorn)-T[12]-(raid|cisd)-(C2|C3)$")
+            self.assertEqual(t["closure"], t["tag"][-2:])
+            self.assertIn(t["entry_kind"], ("close", "fvg"))
+            steps = t["setup"]["checklist"]
+            self.assertEqual([x["step"] for x in steps], [1, 2, 3, 4, 5, 6, 7])
+            self.assertTrue(all(x["ok"] for x in steps), "every entry passed all seven steps")
 
 
 if __name__ == "__main__":

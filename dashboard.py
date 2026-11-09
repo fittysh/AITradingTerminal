@@ -39,7 +39,8 @@ def position_view(p: dict, now: int) -> dict:
     def R(x):
         return d * (x - p["entry"]) / r
 
-    return {k: p.get(k) for k in ("id", "symbol", "direction", "tag", "tier", "family", "trigger", "struct_tf",
+    return {k: p.get(k) for k in ("id", "symbol", "direction", "tag", "tier", "family", "trigger", "closure",
+                                  "entry_kind", "fvg", "struct_tf",
                                   "entry_tf", "entry", "stop", "initial_stop", "stop_kind", "target", "tp1",
                                   "lock_trigger", "lock_level", "peak", "qty", "qty_open", "risk_usd", "tp1_done",
                                   "trail_armed", "lock_done", "opened_at", "mode")} | {
@@ -51,7 +52,8 @@ def position_view(p: dict, now: int) -> dict:
 
 
 def trade_row(t: dict) -> dict:
-    return {k: t.get(k) for k in ("id", "symbol", "direction", "tag", "tier", "family", "trigger", "opened_at",
+    return {k: t.get(k) for k in ("id", "symbol", "direction", "tag", "tier", "family", "trigger", "closure",
+                                  "entry_kind", "fvg", "opened_at",
                                   "closed_at", "entry", "exit_price", "exit_reason", "qty", "risk_usd", "gross_pnl",
                                   "fees", "funding", "net_pnl", "r_mult", "mfe_r", "mae_r", "hold_h", "mode")}
 
@@ -100,12 +102,13 @@ def snapshot(ctx) -> dict:
         e = {k: v for k, v in e.items() if k not in ("checklist", "funnel", "skipped")}
         events.append(e)
     days = journal.list_days(store)[:10]
-    entries = {}
+    entries, views = {}, {}
     for day in days[:7]:
         try:
             entries[day] = (store.paths.journal / f"{day}.md").read_text(encoding="utf-8")
         except OSError:
-            pass
+            continue
+        views[day] = journal.day_view(store, st, now, ctx.label, day_ms=tu.parse_date(day) + 12 * tu.HOUR)
     outbox = sorted((p.name for p in store.paths.outbox.glob("*.html")), reverse=True)[:12]
     curve = _downsample(pb.equity_curve(st), 600)
     return {
@@ -122,7 +125,7 @@ def snapshot(ctx) -> dict:
                   "max_loss": pb.DAILY_MAX_LOSS, "max_losses": pb.MAX_LOSSES_PER_DAY, "target": pb.DAILY_TARGET,
                   "max_age_h": pb.MAX_TRADE_AGE_HOURS, "trail_pct": pb.TRAIL_PCT},
         "stats": pb.trade_stats(closed),
-        "by": {k: pb.breakdown(closed, k) for k in ("family", "tier", "trigger", "direction")},
+        "by": {k: pb.breakdown(closed, k) for k in ("family", "tier", "trigger", "closure", "entry_kind", "direction")},
         "positions": [position_view(p, now) for p in st["positions"]],
         "signals": sig_live, "armed": armed.get("items", [])[:60],
         "scan": store.read("scan") or {}, "sweeps": sweeps, "daily_failure": dfail,
@@ -132,7 +135,7 @@ def snapshot(ctx) -> dict:
         "schedule": {"next": schedule.upcoming(now), "last": store.read("schedule", {}) or {},
                      "labels": schedule.LABELS},
         "events": events,
-        "journal": {"days": days, "entries": entries},
+        "journal": {"days": days, "entries": entries, "views": views},
         "outbox": outbox,
     }
 

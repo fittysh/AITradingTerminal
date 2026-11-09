@@ -1,7 +1,7 @@
 # AITradingTerminal
 
 Autonomous crypto-futures trading bot built on ICT / Smart Money Concepts, implementing
-[**FRAMEWORK.md** (v4 sweep-reversal)](FRAMEWORK.md) for Bitget USDT-M futures. It detects
+[**FRAMEWORK.md** (v5 sweep-reversal + candle 2/3 closure)](FRAMEWORK.md) for Bitget USDT-M futures. It detects
 liquidity-sweep reversals (a stop raid or CISD, then a structure shift, premium/discount, and an
 FVG / Order Block / Unicorn entry), enforces a strict risk shell, and reports to Telegram and Gmail.
 
@@ -59,7 +59,7 @@ Global options work before or after the command: `--sim` (synthetic market, data
 | Command | Does |
 |---|---|
 | `scan` | Routine 1 (top 20 movers + 20 losers, 24h vol ≥ $1M, PDH/PDL state) + Module A sweeps + Routine 2 daily failure → Telegram + Gmail |
-| `signals` | The v4 engine over **all** coins → `state/signals_live.json` (signals + in-zone watch) → Telegram + Gmail |
+| `signals` | The v5 engine over **all** coins → `state/signals_live.json` (signals + in-zone watch) → Telegram + Gmail |
 | `cycle` | `scan` → `signals` → `trade` (what the daemon runs every 4 h) |
 | `trade` | Enter **only** coins listed in `signals_live.json`, each re-validated on fresh candles |
 | `manage` | R-ladder + 48h time-stop on open positions |
@@ -79,7 +79,7 @@ Global options work before or after the command: `--sim` (synthetic market, data
 | trade | every 30 min (:00:30 / :30:30), as each 15m/5m entry candle closes |
 | manage | every 5 min |
 | daily report + PDF | 07:00 (the market day just ended) and 19:00 (the day so far) |
-| journal | rewritten after every job; one file per market day, even with zero trades |
+| journal | rewritten after every job; one page per market day (`.html` in the journal design + `.md`), even with zero trades |
 
 Market day = 07:00 → 07:00 MYT (journal + reports). The protection-shell gates reset at 00:00 MYT,
 as the framework states.
@@ -93,8 +93,11 @@ as the framework states.
 | 2 · stop raid within ~30 bars, or CISD | `liquidity_sweep()`, `_cisd()` |
 | 3 · MSS / CHoCH | `structure_shift()` |
 | 4 · premium / discount | `dealing_range()` |
-| 5 · FVG (Unicorn via breaker) or Order Block; tags sweep-/unicorn-/OB- | `find_fvgs()`, `breaker_overlap()`, `order_block()`, `poi_zones()` |
-| 6 · solid-body entry candle, stop ≥0.8% & ≤12%, target DOL with 1:2 floor | `confirmation()`, `stop_for()` |
+| 5 · candle 2 / candle 3 closure at the reversal extreme (setup TF) | `candle_closure()` |
+| 6 · FVG (Unicorn via breaker) or Order Block; tags sweep-/unicorn-/OB- + C2/C3 | `find_fvgs()`, `breaker_overlap()`, `order_block()`, `poi_zones()` |
+| 7 · entry candle: pullback into the zone, ≥50% body closing beyond the series; +FVG and FVG retest; stop ≥0.8% & ≤12%, target DOL with 1:2 floor | `entry_trigger()`, `_series_state()`, `stop_for()` |
+| Signal ranking: signal → +FVG → tier → reward:risk | `run_bot._rank()` |
+| Daily journal (title, At a glance, trade log, notes) | `journal.py` → `journal/YYYY-MM-DD.html` + `.md`, dashboard Journal tab |
 | Protection shell constants | `paper_bot.py`: `RISK_PER_TRADE`, `MAX_OPEN_POSITIONS`, `CORR_MAX_PER_SIDE`, `DAILY_MAX_LOSS`, `MAX_LOSSES_PER_DAY`, `DAILY_TARGET`, `MAX_TRADE_AGE_HOURS` |
 | R-ladder (−1R · +1R 50% off + BE + trail · 1% trail · lock +1R at +2R · DOL · 48h) | `paper_bot.mark()` (paper), `bitget_broker.BitgetBroker` (demo/live, exchange-held) |
 | Module A liquidity-sweep screen (degraded) | `sweep_screen.py`, spec in [MODULE_A_liquidity_sweep.md](MODULE_A_liquidity_sweep.md) |
@@ -118,8 +121,16 @@ single function, so it's easy to change.
 - **CISD** is read on the *last* delivery leg: a series of ≥2 against-closes into a 5-bar swing, then a
   close back through the leg's origin. A single engulfing candle at a minor wiggle is noise. (The
   looser reading fired on ~10% of all coins at any moment in testing.)
-- **POI timeframe.** The POI is read on the structure timeframe; the entry timeframe supplies the
-  confirmation candle. The confirmation must be the *latest* closed entry candle with a body ≥50%.
+- **Zone timeframe.** The zone is read on the setup timeframe; the entry timeframe supplies the series
+  and the entry candle.
+- **C2 / C3 closure** is read on the setup timeframe (4H with 15m, 1H with 5m). C2 is the candle that
+  printed the reversal extreme and C1 the one before it; "back inside C1's range" means a close beyond
+  C1's low (high for shorts).
+- **Series** = the most recent run (≥1 candle) of against-closes whose pullback reached the zone,
+  ending within the last 20 entry bars; its level is the highest open (lowest for shorts). The first
+  close beyond it must have a ≥50% body.
+- **30-minute window.** The trade loop runs every 30 minutes, so an entry candle or FVG retest counts
+  while it closed within the last 30 minutes.
 - **Stop** sits 0.1% beyond the raid extreme, is floored at 0.8%, and the setup is rejected beyond
   12%. **Target** is `max(DOL, entry + 2R)`: "≥ 1:2 floor" is read as a floor, like the stop's.
 - **`signals_live.json`** holds exactly "coins meeting the framework + in-zone watch". Setups still
@@ -135,9 +146,9 @@ single function, so it's easy to change.
 ## Files and outputs
 
 ```
-run_bot.py          jobs, daemon, replay, CLI          strategy.py      the v4 engine
+run_bot.py          jobs, daemon, replay, CLI          strategy.py      the v5 engine
 paper_bot.py        protection shell + R-ladder         sweep_screen.py  Module A
-bitget_report.py    net-of-fees report (md/html/pdf)    journal.py       journal/YYYY-MM-DD.md
+bitget_report.py    net-of-fees report (md/html/pdf)    journal.py       journal/YYYY-MM-DD.html|md
 exchange.py         Bitget public + signed REST         bitget_broker.py demo/live execution
 sim.py              synthetic + historical replay mkts  dashboard.py     snapshot, HTML, server
 tui.py              terminal UI + `status`              notify.py        Telegram + Gmail
@@ -146,13 +157,13 @@ dashboard/template.html   the dashboard front end (vanilla JS/SVG, no CDN)
 
 state/   state.json · signals_live.json · armed.json · sweeps.json · scan.json · daily_failure.json
          events.jsonl · schedule.json · bot.log · outbox/ (every notification, also when unsent)
-journal/ YYYY-MM-DD.md        reports/ YYYY-MM-DD_0700.pdf|md …        dashboard/index.html
+journal/ YYYY-MM-DD.html|md   reports/ YYYY-MM-DD_0700.pdf|md …        dashboard/index.html
 ```
 
 The terminal UI (positions tab excerpt):
 
 ```
- AI TRADING TERMINAL   v4 sweep-reversal · Bitget USDT-M Futures                  SIM·PAPER   2026-09-25 21:28:29 MYT
+ AI TRADING TERMINAL   v5 sweep-reversal · Bitget USDT-M Futures                  SIM·PAPER   2026-09-25 21:28:29 MYT
  Equity $600.21 (+$1.12)   Today +$6.20 +2.48R 5W/1L   Win 55.6% · Exp +0.01R · PF 1.03 · 36 trades
  ✓ ENTRIES ALLOWED   Loss stop ARMED $0.00/−$15 · losses 1/6 · PROTECT off +$6.20/+$15 · open 2/5 (L1/3 S1/3)
 
@@ -175,7 +186,7 @@ Keys: `1-9` tabs · `↑↓/jk` move · `s` scan cycle · `g` signals · `t` tra
 
 ```ini
 [Unit]
-Description=AI Trading Terminal (v4 sweep-reversal)
+Description=AI Trading Terminal (v5 sweep-reversal)
 After=network-online.target
 
 [Service]
@@ -196,7 +207,7 @@ at start-up, and the paper ladder replays the candles it missed.
 ## Validation workflow (from demo to live)
 
 1. `python run_bot.py replay --source bitget --days 30 --top 40` replays real Bitget history, with
-   candles cached under `replay/cache/`. The report breaks results down by family, tier and trigger.
+   candles cached under `replay/cache/`. The report breaks results down by family, tier, trigger, C2/C3 closure and entry type.
 2. Paper or demo trade the daemon until the record is meaningful.
 3. Live is only accepted when `LIVE_CONFIRM=I-ACCEPT-LIVE-RISK` is set **and** the edge gate passes
    on this home's closed trades: at least 30 trades, positive net and expectancy, and PF ≥ 1.2

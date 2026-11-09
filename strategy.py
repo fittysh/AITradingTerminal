@@ -1,27 +1,35 @@
-"""strategy.py — the v4 sweep-reversal engine (FRAMEWORK.md → "The entry sequence").
+"""strategy.py — the v5 sweep-reversal engine (FRAMEWORK.md → "Entry: all seven steps must pass").
 
 evaluate() runs every enabled tier in order (T1 → T2); the first *signal* wins. _reversal() is the
-per-tier sequence:
+per-tier sequence (setup TF = 4H for T1 / 1H for T2; entry TF = 15m / 5m):
 
-  1  Market structure (ITH/ITL on the structure TF) + daily bias (PDH/PDL) decide which direction
+  1  Context: market structure (ITH/ITL on the setup TF) + daily bias (PDH/PDL) decide which direction
      may trade. The opposing liquidity pool is the Draw on Liquidity (DOL) = take-profit.
-  2  Stop raid: the most recent pool (swing low for longs / swing high for shorts) pierced and then
+  2  Trigger: the most recent pool (swing low for longs / swing high for shorts) pierced and then
      reclaimed by a close, within ~30 bars — OR, when there is no raid, a CISD: the origin of the last
      delivery leg is closed through the other way. The raid extreme is the stop reference.
   3  Structure shift (MSS/CHoCH): a close through the last opposing pivot formed before the raid.
   4  Premium/discount: dealing range = raid extreme → post-shift extreme. Longs only below
      equilibrium (discount), shorts only above (premium).
-  5  POI in that half: a fresh FVG (a Unicorn when a breaker overlaps it) or, failing that, the
+  5  Confirmation (new in v5): a candle-2 or candle-3 closure at the reversal extreme on the setup TF
+     (TTrades fractal model). C2 = the candle that printed the extreme, C1 = the one before it.
+     C2 closure: C2 trades through C1's low and closes back above it. C3 closure: C2 closed below C1's
+     low, and the next candle (C3) closes back above it. Neither → a continuation, no trade.
+  6  Zone in that half: a fresh FVG (a Unicorn when a breaker overlaps it) or, failing that, the
      order block. Tags: sweep-* (FVG), unicorn-*, OB-*.
-  6  Entry: price inside the POI plus a solid-body (≥50% of range) confirmation candle on the entry
-     TF. Stop beyond the raid extreme (floored ≥0.8%, setup rejected beyond 12%); target = the DOL
-     with a 1:2 floor.
+  7  Entry candle on the entry TF: the pullback ("series" of down-closes for a long) traded into the
+     zone, then a candle with a solid body (≥ 50% of its range) closes its body above the series —
+     above the highest open of that series (mirror for shorts). Combined with an FVG: when the
+     move off the pullback low leaves an entry-TF FVG, the setup is flagged +FVG (ranked first), and
+     a solid retest of that FVG after the series close is a second entry opportunity.
+     Stop beyond the raid extreme (floored ≥0.8%, setup rejected beyond 12%); target = the DOL with
+     a 1:2 floor.
 
 Primitives read CLOSED candles only — the caller's `get(tf, limit)` drops the forming candle.
 
-Setup status:  signal   all six steps pass → tradable
-               in-zone  steps 1–5 pass, price is in the POI, confirmation candle not printed yet
-               armed    steps 1–5 pass, waiting for price to retrace into the POI
+Setup status:  signal   all seven steps pass → tradable
+               in-zone  steps 1–6 pass, price reached the zone, the entry candle has not printed yet
+               armed    steps 1–6 pass, waiting for price to retrace into the zone
 
 Interpretation notes (where the framework text leaves a choice, this is the choice made):
   • Daily bias = the previous day's close vs the day before's range: close above its high →
@@ -29,11 +37,20 @@ Interpretation notes (where the framework text leaves a choice, this is the choi
     the bias — it has no backtested edge and stays research-only (daily_failure, routine 2).
   • Liquidity pools (raids, DOL) are 5-bar fractal swings; the structure shift and the ITH/ITL
     hierarchy use 3-bar short-term swings (ICT STH/STL → ITH/ITL).
-  • The POI is read on the structure TF (where the raid and the displacement live); the entry TF
-    supplies the confirmation candle, which must be the LATEST closed entry-TF candle (an older
-    solid candle whose reaction has faded does not count).
-  • CISD needs a series (≥2) of against-closes delivering price into a 5-bar swing, walked from the
-    most recent leg backwards — a single engulfing candle at a minor wiggle is noise, not a CISD.
+  • The zone is read on the setup TF (where the raid and the displacement live); the entry TF supplies
+    the series and the entry candle.
+  • CISD (step 2) needs a series (≥2) of against-closes delivering price into a 5-bar swing, walked from
+    the most recent leg backwards — a single engulfing candle at a minor wiggle is noise, not a CISD.
+  • C2/C3 closures are read on the setup TF (4H with a 15m entry, 1H with a 5m entry — the fractal
+    model's pairs). "Back inside C1's range" = a close beyond C1's low (high for shorts); a close
+    beyond C1's other extreme counts too.
+  • The entry-TF series is the most recent run of down-closes (≥1 candle) whose pullback reached the
+    zone without closing through its far edge, ending within the last 20 entry bars. The level is the
+    highest open in the run (the top of its bodies). The candle that first closes above it is the
+    entry candle; it must close in the trade direction with a ≥50% body, and no close may fall back
+    below the level afterwards.
+  • The trade loop runs every 30 minutes but entry candles close every 15m / 5m, so an entry candle
+    (or FVG retest) counts while it closed within the last 30 minutes. Older ones are spent.
   • "≥ 1:2 floor" is a floor, like the stop's 0.8% floor: target = max(DOL, entry + 2R).
   • The stop sits 0.1% beyond the raid extreme.
 """
@@ -51,7 +68,9 @@ LONG, SHORT = "long", "short"
 RAID_LOOKBACK = 30          # stop raid / CISD "within ~30 bars" of the stop-raid TF
 RECLAIM_BARS = 3            # the pierce must be reclaimed by a close within 3 bars (incl. the pierce bar)
 CISD_MIN_RUN = 2            # CISD delivery leg: a series ("down-close bodies"), not a single candle
-BODY_MIN = 0.50             # confirmation candle: body ≥ 50% of range (a wick/shadow is a likely fake)
+BODY_MIN = 0.50             # entry candle: body ≥ 50% of range (a wick/shadow is a likely fake)
+SERIES_LOOKBACK = 20        # entry TF: the series that delivered price into the zone ends within 20 bars
+SERIES_FRESH_MS = 30 * 60_000   # an entry candle / FVG retest counts for one trade-check interval (30 min)
 STOP_FLOOR_PCT = 0.008      # stop floored at ≥ 0.8% from entry
 STOP_MAX_PCT = 0.12         # whole setup rejected if the stop is > 12% away (spike / poor-RR guard)
 RR_FLOOR = 2.0              # target = DOL, never closer than 1:2
@@ -66,7 +85,8 @@ MIN_STRUCT_BARS = 40
 CHART_BARS = 90
 DAILY_TF = "1D"             # Bitget 1D = UTC+8 day, i.e. MYT midnight — matches the gates' day
 
-STAGES = ("no data", "context", "trigger", "shift", "armed", "in-zone", "signal")
+STAGES = ("no data", "context", "trigger", "shift", "closure", "armed", "in-zone", "signal")
+STAGE = {name: i for i, name in enumerate(STAGES)}
 FAMILY = {"FVG": "sweep", "unicorn": "unicorn", "OB": "OB"}
 POI_PRIORITY = {"unicorn": 0, "FVG": 1, "OB": 2}
 
@@ -152,6 +172,11 @@ class Setup:
     checklist: List[dict]
     chart: dict
     found_at: int
+    closure: str = ""                # "C2" | "C3" (step 5)
+    entry_kind: str = ""             # "close" (series close) | "fvg" (FVG retest) — set on a signal
+    fvg: bool = False                # +FVG: the move off the pullback low left an entry-TF FVG
+    candle: dict = field(default_factory=dict)    # step 5 detail: C1/C2/C3 timestamps and the C1 level
+    series: Optional[dict] = None    # step 7 detail: the entry-TF series and its level
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -466,28 +491,166 @@ def select_poi(zones: List[Zone], price: float, direction: str) -> Tuple[Optiona
     return (min(ahead, key=lambda z: (z.lo, POI_PRIORITY[z.kind])), False) if ahead else (None, False)
 
 
-# --- 6 · entry, stop, target ---------------------------------------------------------------------
+# --- 5 · candle 2 / candle 3 closure ---------------------------------------------------------------
 
-def confirmation(entry_candles: Sequence[Candle], tf: str, direction: str, zone: Zone, now_ms: int) -> Optional[dict]:
-    """The latest closed entry-TF candle confirms when it traded into the POI, closed in the trade
-    direction with a solid body (≥ BODY_MIN of its range) and did not close through the POI's far edge.
-    Stale data (latest close older than one entry-TF period) never confirms."""
-    if not entry_candles:
-        return None
-    x = entry_candles[-1]
-    if x.ts + 2 * tf_ms(tf) <= now_ms:
-        return None
-    rng = x.h - x.l
-    if rng <= 0:
-        return None
+def candle_closure(c: Sequence[Candle], direction: str, ext_idx: int) -> Tuple[Optional[dict], str]:
+    """Step 5 on the setup TF. C2 = the candle that printed the reversal extreme, C1 = the candle before it.
+    C2 closure: C2 trades through C1's low (high for shorts) and closes back above it.
+    C3 closure: C2 closed below C1's low; the next candle (C3) closes back above it.
+    Returns (closure, reason): closure = {"kind", "level" (C1's low), "c1", "c2", "close" (index of the
+    closing candle)}; reason says why there is none (or that C3 has not closed yet)."""
+    side = "low" if direction == LONG else "high"
+    if ext_idx < 1:
+        return None, "no candle before the extreme"
     sg = _sign(direction)
-    body = sg * (x.c - x.o) / rng
-    lo, hi = zone.lo * (1 - POI_TOLERANCE), zone.hi * (1 + POI_TOLERANCE)
-    far = lo if direction == LONG else hi
-    if body < BODY_MIN or x.l > hi or x.h < lo or sg * (x.c - far) < 0:
-        return None
-    return {"ts": x.ts, "tf": tf, "o": x.o, "h": x.h, "l": x.l, "c": x.c, "body": round(body, 3)}
+    c1, c2 = c[ext_idx - 1], c[ext_idx]
+    level = _pool_side(c1, direction)
+    if sg * (level - _pool_side(c2, direction)) <= 0:
+        return None, f"the extreme candle did not trade through the previous candle's {side}"
+    out = {"level": level, "c1": ext_idx - 1, "c2": ext_idx}
+    if sg * (c2.c - level) > 0:
+        return dict(out, kind="C2", close=ext_idx), ""
+    if ext_idx + 1 >= len(c):
+        return None, f"C2 closed beyond C1's {side} {px(level)}; waiting for C3 to close"
+    if sg * (c[ext_idx + 1].c - level) > 0:
+        return dict(out, kind="C3", close=ext_idx + 1), ""
+    return None, f"neither C2 nor C3 closed back inside C1's {side} {px(level)} (continuation, not a reversal)"
 
+
+# --- 7 · entry candle: series close (+FVG) -------------------------------------------------------
+
+def _runs(c: Sequence[Candle], direction: str, start: int):
+    """Runs of against-closes (the "series"), most recent first, that end at or after `start`:
+    yields (first, last) indices; a run may begin before `start`."""
+    i = len(c) - 1
+    while i >= start:
+        while i >= start and not _against(c[i], direction):
+            i -= 1
+        if i < start:
+            return
+        last = i
+        while i >= 0 and _against(c[i], direction):
+            i -= 1
+        yield i + 1, last
+
+
+def _reached(c: Sequence[Candle], direction: str, first: int, zones: List[Zone]) -> Optional[Zone]:
+    """The best zone (unicorn > FVG > OB, then the most recent) that the pullback c[first:] traded into
+    without any close through the zone's far edge."""
+    tol = POI_TOLERANCE
+    seg = c[first:]
+    sg = _sign(direction)
+    ext = sg * min(sg * _pool_side(x, direction) for x in seg)
+    hits = []
+    for z in zones:
+        near, far = (z.hi * (1 + tol), z.lo * (1 - tol)) if direction == LONG else (z.lo * (1 - tol), z.hi * (1 + tol))
+        if sg * (ext - near) > 0 or any(sg * (x.c - far) < 0 for x in seg):
+            continue
+        hits.append(z)
+    return min(hits, key=lambda z: (POI_PRIORITY[z.kind], -z.idx)) if hits else None
+
+
+def _body(x: Candle, direction: str) -> float:
+    rng = x.h - x.l
+    return _sign(direction) * (x.c - x.o) / rng if rng > 0 else 0.0
+
+
+def _bar(x: Candle, tf: str, **extra) -> dict:
+    return dict({"ts": x.ts, "tf": tf, "o": x.o, "h": x.h, "l": x.l, "c": x.c}, **extra)
+
+
+def entry_trigger(e: Sequence[Candle], tf: str, direction: str, zones: List[Zone], now_ms: int) -> dict:
+    """Step 7 on the entry TF. Returns {"state": "signal" | "in-zone" | "none", "zone", "confirm", "series",
+    "fvg", "kind", "wait"}.
+
+    The series = the most recent run of against-closes whose pullback reached a zone (ending within
+    SERIES_LOOKBACK bars). Entry when either
+      close  the first candle to close beyond the series level has a ≥50% body in the trade direction,
+             closed within the last 30 minutes, and nothing has closed back through the level since; or
+      fvg    after that close, the move off the pullback low left an entry-TF FVG, and a candle closed within
+             the last 30 minutes traded into it, closed with a ≥50% body in the trade direction and stayed
+             beyond the series level (nothing closed back through the level from the series close on).
+    +FVG = an entry-TF FVG formed in the move off the pullback low (always true for an FVG retest)."""
+    out = {"state": "none", "zone": None, "confirm": None, "series": None, "fvg": False, "kind": "", "wait": ""}
+    n = len(e)
+    if n < 2 or not zones:
+        return out
+    tfm = tf_ms(tf)
+    if e[-1].ts + 2 * tfm <= now_ms:
+        out["wait"] = f"{tf} data is stale"
+        return out
+    # The most recent series that reached a zone decides what we are waiting for; an older series whose
+    # close is still fresh and unbroken (a shallow pullback printed since) can still give the entry.
+    first_state = None
+    for first, last in _runs(e, direction, max(0, n - 1 - SERIES_LOOKBACK)):
+        st = _series_state(e, tf, tfm, direction, zones, now_ms, first, last)
+        if st is None:
+            continue
+        if st["state"] == "signal":
+            return st
+        if first_state is None:
+            first_state = st
+    return first_state or out
+
+
+def _series_state(e: Sequence[Candle], tf: str, tfm: int, direction: str, zones: List[Zone], now_ms: int,
+                  first: int, last: int) -> Optional[dict]:
+    """entry_trigger() for one series e[first..last]; None when its pullback did not reach a zone."""
+    zone = _reached(e, direction, first, zones)
+    if zone is None:
+        return None
+    n = len(e)
+    sg = _sign(direction)
+    side = "above" if direction == LONG else "below"
+    fresh_from = now_ms - SERIES_FRESH_MS
+
+    def fresh(k: int) -> bool:
+        return e[k].ts + tfm > fresh_from
+
+    opens = [e[j].o for j in range(first, last + 1)]
+    level = max(opens) if direction == LONG else min(opens)
+    series = {"first_ts": e[first].ts, "last_ts": e[last].ts, "bars": last - first + 1, "level": level, "tf": tf}
+    out = {"state": "in-zone", "zone": zone, "confirm": None, "series": series, "fvg": False, "kind": "", "wait": ""}
+    t = next((k for k in range(last + 1, n) if sg * (e[k].c - level) > 0), None)
+    if t is None:
+        out["wait"] = f"waiting for a {tf} body close {side} the series at {px(level)}"
+        return out
+    low_idx = min(range(first, t + 1), key=lambda j: (sg * _pool_side(e[j], direction), -j))
+    gaps = [g for g in find_fvgs(e, direction, start=low_idx) if g.idx + 1 <= n - 1]
+    out["fvg"] = bool(gaps)
+    series["close_ts"] = e[t].ts
+    if not all(sg * (e[k].c - level) > 0 for k in range(t, n)):
+        out["wait"] = f"the {tf} close {side} {px(level)} failed (closed back through it); waiting for a new series"
+        return out
+    x = e[t]
+    if fresh(t) and _body(x, direction) >= BODY_MIN:
+        out.update(state="signal", kind="close",
+                   confirm=_bar(x, tf, body=round(_body(x, direction), 3), kind="close", level=level,
+                                fvg=[gaps[-1].lo, gaps[-1].hi] if gaps else None))
+        return out
+    tol = POI_TOLERANCE
+    for y in range(n - 1, t, -1):
+        if not fresh(y):
+            break
+        yb = e[y]
+        if _body(yb, direction) < BODY_MIN:
+            continue
+        for g in reversed(gaps):
+            if g.idx + 2 > y:
+                continue                          # the gap completed after this candle
+            near, far = (g.hi * (1 + tol), g.lo * (1 - tol)) if direction == LONG else (g.lo * (1 - tol), g.hi * (1 + tol))
+            if sg * (_pool_side(yb, direction) - near) <= 0 and sg * (yb.c - far) >= 0:
+                out.update(state="signal", kind="fvg", fvg=True,
+                           confirm=_bar(yb, tf, body=round(_body(yb, direction), 3), kind="fvg", level=level,
+                                        fvg=[g.lo, g.hi]))
+                return out
+    why = "older than 30 min" if not fresh(t) else f"body {_body(x, direction):.0%} < {BODY_MIN:.0%}"
+    out["wait"] = (f"the {tf} close {side} the series at {px(level)} is spent ({why}); "
+                   f"waiting for an FVG retest or a new series")
+    return out
+
+
+# --- stop + target ---------------------------------------------------------------------------------
 
 def stop_for(direction: str, entry: float, extreme: float) -> Tuple[Optional[float], float, str]:
     """(stop, risk distance, reject reason). Beyond the raid extreme, floored at 0.8%, rejected > 12%."""
@@ -553,15 +716,26 @@ def _reversal(symbol: str, tier: Tier, get: Getter, price: float, now_ms: int,
             notes.append(f"{lbl}: {trig.kind} found, no structure shift yet")
             continue
         stage = max(stage, 3)
+        closure, why = candle_closure(S, d, trig.ext_idx)
+        if closure is None:
+            notes.append(f"{lbl}: {trig.kind} + shift found, no candle closure — {why}")
+            continue
+        stage = max(stage, 4)
         lo, hi, eq = dealing_range(S, d, trig)
-        zone, inside = select_poi(poi_zones(S, d, trig, shift, lo, hi, eq), price, d)
+        zones = poi_zones(S, d, trig, shift, lo, hi, eq)
+        zone, inside = select_poi(zones, price, d)
         half = "discount" if d == LONG else "premium"
         if zone is None:
             notes.append(f"{lbl}: no fresh FVG/OB left in the {half} half")
             continue
         sg = _sign(d)
         in_half = sg * (eq - price) > 0
-        in_zone = inside and in_half
+        et = None
+        if in_half:
+            et = entry_trigger(get(tier.entry_tf, tier.entry_bars), tier.entry_tf, d, zones, now_ms)
+            if et["zone"] is not None:
+                zone = et["zone"]
+        in_zone = in_half and (inside or (et is not None and et["zone"] is not None))
         entry = price if in_zone else (zone.hi if d == LONG else zone.lo)
         stop, risk, why = stop_for(d, entry, trig.extreme)
         if stop is None:
@@ -571,17 +745,17 @@ def _reversal(symbol: str, tier: Tier, get: Getter, price: float, now_ms: int,
         target = entry + sg * RR_FLOOR * risk
         if dol is not None and sg * (dol - target) > 0:
             target = dol
-        stage = max(stage, 4)
-        status, confirm = "armed", None
+        stage = max(stage, STAGE["armed"])
+        status = "armed"
         if in_zone:
-            stage = max(stage, 5)
+            stage = max(stage, STAGE["in-zone"])
             status = "in-zone"
-            confirm = confirmation(get(tier.entry_tf, tier.entry_bars), tier.entry_tf, d, zone, now_ms)
-            if confirm:
+            if et is not None and et["state"] == "signal":
                 status = "signal"
-                stage = 6
-        setups.append(_build(symbol, tier, d, status, S, trig, shift, (lo, hi, eq), zone, price, entry,
-                             stop, risk, target, dol, dol_kind, confirm, bias, structure, in_half, now_ms))
+                stage = STAGE["signal"]
+        setups.append(_build(symbol, tier, d, status, S, trig, shift, closure, (lo, hi, eq), zone, price, entry,
+                             stop, risk, target, dol, dol_kind, et if in_zone else None, bias, structure, in_half,
+                             now_ms))
     return setups, stage, notes
 
 
@@ -598,7 +772,7 @@ def evaluate(symbol: str, get: Getter, price: float, now_ms: int, tiers: Sequenc
         stage, notes = max(stage, st), notes + tnotes
         signals = [s for s in setups if s.status == "signal"]
         if signals:
-            return Result(symbol, max(signals, key=lambda s: (s.raid["ts"], s.rr)), 6, notes)
+            return Result(symbol, max(signals, key=lambda s: (s.fvg, s.raid["ts"], s.rr)), STAGE["signal"], notes)
         for s in setups:
             if best is None or (s.status == "in-zone" and best.status == "armed"):
                 best = s
@@ -607,44 +781,62 @@ def evaluate(symbol: str, get: Getter, price: float, now_ms: int, tiers: Sequenc
 
 # --- presentation --------------------------------------------------------------------------------
 
-def _build(symbol, tier, d, status, S, trig, shift, rng, zone, price, entry, stop, risk, target, dol,
-           dol_kind, confirm, bias, structure, in_half, now_ms) -> Setup:
+def _build(symbol, tier, d, status, S, trig, shift, closure, rng, zone, price, entry, stop, risk, target, dol,
+           dol_kind, et, bias, structure, in_half, now_ms) -> Setup:
     lo, hi, eq = rng
     sg = _sign(d)
     rr = sg * (target - entry) / risk
     family = FAMILY[zone.kind]
-    tag = f"{family}-{tier.name}-{trig.kind}"
+    tag = f"{family}-{tier.name}-{trig.kind}-{closure['kind']}"
     n = len(S)
     side_word = "low" if d == LONG else "high"
     half = "discount" if d == LONG else "premium"
+    beyond = "above" if d == LONG else "below"
     if trig.kind == "raid":
         trig_txt = (f"swept swing {side_word} {px(trig.level)} to {px(trig.extreme)}, reclaimed "
                     f"{trig.confirm_idx - trig.idx} bar(s) later · {n - 1 - trig.idx} bars ago")
     else:
         trig_txt = (f"CISD: close through delivery origin {px(trig.level)} · swing {side_word} "
                     f"{px(trig.extreme)} · {n - 1 - trig.idx} bars ago")
+    c2 = S[closure["c2"]]
+    if closure["kind"] == "C2":
+        closure_txt = (f"C2 closure: C2 took C1's {side_word} {px(closure['level'])} to {px(_pool_side(c2, d))} "
+                       f"and closed back {beyond} it at {px(c2.c)}")
+    else:
+        closure_txt = (f"C3 closure: C2 closed {px(c2.c)}, through C1's {side_word} {px(closure['level'])}; "
+                       f"C3 closed back {beyond} it at {px(S[closure['close']].c)}")
     zone_txt = f"{zone.kind} {px(zone.lo)}–{px(zone.hi)}"
     if zone.kind == "unicorn":
         zone_txt += f" (breaker ∩ FVG {px(zone.src_lo)}–{px(zone.src_hi)})"
+    confirm = et["confirm"] if et and et["state"] == "signal" else None
+    series = et["series"] if et else None
+    fvg_flag = bool(et and et["fvg"])
     if confirm:
-        entry_txt = (f"{tier.entry_tf} {'bull' if d == LONG else 'bear'} candle, body {confirm['body']:.0%}, in POI · "
-                     f"stop {px(stop)} ({risk / entry:.2%}) · target {px(target)} ({rr:.2f}R)")
+        word = "bull" if d == LONG else "bear"
+        head = (f"{tier.entry_tf} {word} candle closed {px(confirm['c'])} {beyond} the series {px(confirm['level'])}"
+                if confirm["kind"] == "close" else
+                f"FVG retest: {tier.entry_tf} {word} candle in the FVG {px(confirm['fvg'][0])}–{px(confirm['fvg'][1])}, "
+                f"closed {px(confirm['c'])}, series {px(confirm['level'])} held")
+        entry_txt = (f"{head} · body {confirm['body']:.0%}{' · +FVG' if fvg_flag else ''} · stop {px(stop)} "
+                     f"({risk / entry:.2%}) · target {px(target)} ({rr:.2f}R)")
     elif status == "in-zone":
-        entry_txt = f"price in POI — waiting for a solid-body {tier.entry_tf} candle (≥{BODY_MIN:.0%} body)"
+        entry_txt = (et or {}).get("wait") or (f"price in the zone — waiting for a {tier.entry_tf} series and a "
+                                               f"≥{BODY_MIN:.0%} body close {beyond} it")
     else:
-        entry_txt = f"waiting for price to reach the POI ({abs(price - entry) / price:.2%} away)"
+        entry_txt = f"waiting for price to reach the zone ({abs(price - entry) / price:.2%} away)"
     checklist = [
-        {"step": 1, "name": "Structure + daily bias", "ok": True,
+        {"step": 1, "name": "Context", "ok": True,
          "detail": f"{tier.struct_tf} structure {structure} · daily {bias} → {d}s allowed · DOL {px(dol)} ({dol_kind})"},
-        {"step": 2, "name": "Stop raid / CISD", "ok": True, "detail": trig_txt},
+        {"step": 2, "name": "Trigger", "ok": True, "detail": trig_txt},
         {"step": 3, "name": "Structure shift", "ok": True,
          "detail": f"close {px(S[shift.idx].c)} through {'lower-high' if d == LONG else 'higher-low'} "
                    f"{px(shift.level)} · {shift.idx - trig.idx} bar(s) after the {trig.kind}"},
-        {"step": 4, "name": "Premium / discount", "ok": in_half,
+        {"step": 4, "name": "Discount / premium", "ok": in_half,
          "detail": f"range {px(lo)}–{px(hi)} · EQ {px(eq)} · price {px(price)} "
                    f"{'in ' + half if in_half else 'not yet in ' + half}"},
-        {"step": 5, "name": "POI", "ok": True, "detail": zone_txt},
-        {"step": 6, "name": "Entry trigger", "ok": confirm is not None, "detail": entry_txt},
+        {"step": 5, "name": "C2 / C3 closure", "ok": True, "detail": f"{tier.struct_tf} {closure_txt}"},
+        {"step": 6, "name": "Zone", "ok": True, "detail": zone_txt},
+        {"step": 7, "name": "Entry candle", "ok": confirm is not None, "detail": entry_txt},
     ]
     tail = S[-CHART_BARS:]
     return Setup(
@@ -663,4 +855,8 @@ def _build(symbol, tier, d, status, S, trig, shift, rng, zone, price, entry, sto
         chart={"tf": tier.struct_tf, "t": [x.ts for x in tail], "o": [sig(x.o) for x in tail],
                "h": [sig(x.h) for x in tail], "l": [sig(x.l) for x in tail], "c": [sig(x.c) for x in tail]},
         found_at=now_ms,
+        closure=closure["kind"], entry_kind=confirm["kind"] if confirm else "", fvg=fvg_flag,
+        candle={"kind": closure["kind"], "level": closure["level"], "c1_ts": S[closure["c1"]].ts,
+                "c2_ts": S[closure["c2"]].ts, "close_ts": S[closure["close"]].ts},
+        series=series,
     )

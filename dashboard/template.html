@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Trading Terminal</title>
-<meta name="description" content="v4 sweep-reversal trading dashboard — Bitget USDT-M, DEMO by default">
+<meta name="description" content="v5 sweep-reversal trading dashboard — Bitget USDT-M, DEMO by default">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a1a19'/%3E%3Cpath d='M10 7v18M22 5v20' stroke='%23898781' stroke-width='2'/%3E%3Crect x='7' y='11' width='6' height='9' rx='1' fill='%23d03b3b'/%3E%3Crect x='19' y='9' width='6' height='11' rx='1' fill='none' stroke='%230ca30c' stroke-width='2'/%3E%3C/svg%3E">
 <style>
 /* Tokens: the dataviz reference palette (validated). Light is the base; dark is selected, not flipped. */
@@ -17,6 +17,7 @@
   --pos: #0ca30c; --neg: #d03b3b; --warn: #fab219; --serious: #ec835a;
   --pos-text: #006300; --neg-text: #d03b3b; --mid: #f0efec;
   --f1: #86b6ef; --f2: #5598e7; --f3: #2a78d6; --f4: #1c5cab; --f5: #0d366b;
+  --jhead: #172242; --jink: #141c33; --jcell: #f1f3f5;
   --shadow: 0 1px 2px rgba(11,11,11,0.05), 0 4px 16px rgba(11,11,11,0.04);
 }
 @media (prefers-color-scheme: dark) {
@@ -28,6 +29,7 @@
     --accent: #3987e5; --accent-wash: rgba(57,135,229,0.13); --accent-track: #0d366b;
     --pos-text: #0ca30c; --neg-text: #e66767; --mid: #383835;
     --f1: #184f95; --f2: #3987e5; --f3: #6da7ec; --f4: #9ec5f4; --f5: #cde2fb;
+    --jhead: #2a3a66; --jink: #ffffff; --jcell: #222220;
     --shadow: none;
   }
 }
@@ -39,6 +41,7 @@
   --accent: #3987e5; --accent-wash: rgba(57,135,229,0.13); --accent-track: #0d366b;
   --pos-text: #0ca30c; --neg-text: #e66767; --mid: #383835;
   --f1: #184f95; --f2: #3987e5; --f3: #6da7ec; --f4: #9ec5f4; --f5: #cde2fb;
+  --jhead: #2a3a66; --jink: #ffffff; --jcell: #222220;
   --shadow: none;
 }
 * { box-sizing: border-box; }
@@ -176,6 +179,30 @@ tr.sel td { background: var(--accent-wash); }
 .md p { margin: 4px 0; color: var(--ink-2); } .md ul, .md ol { margin: 4px 0 4px 18px; padding: 0; color: var(--ink-2); }
 .md table { margin: 6px 0 10px; } .md code { font-size: 12px; background: var(--hover); padding: 1px 4px; border-radius: 4px; }
 .days { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+/* journal: the daily journal design (title, note, boxes, at a glance, trade log) */
+.jr-top { display: flex; gap: 18px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.jr-title { font: 900 34px/1.05 "Arial Black", "Helvetica Neue", Arial, sans-serif; color: var(--jink); margin: 4px 0 10px; }
+.jr-sub { font: italic 15px/1.45 Georgia, "Times New Roman", serif; color: var(--ink-2); margin: 0; max-width: 560px; }
+.jr-boxes { display: grid; gap: 6px; }
+.jr-box { display: grid; grid-template-columns: auto 120px; gap: 10px; align-items: center; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
+.jr-box b { background: var(--jcell); border: 2px solid var(--border); padding: 6px 10px; text-align: right; color: var(--ink); font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 14px; }
+.jr-h { font: 900 16px/1.2 "Arial Black", "Helvetica Neue", Arial, sans-serif; color: var(--jink); text-transform: uppercase; letter-spacing: .02em; margin: 26px 0 10px; }
+.jr-h.small { font-size: 13px; color: var(--ink-2); margin-top: 22px; }
+.jr-glance { display: grid; grid-template-columns: 1fr 1fr; border-top: 3px solid var(--jink); }
+.jr-glance > div { border: 1px solid var(--grid); border-top: 0; padding: 16px 12px 14px; text-align: center; }
+.jr-glance > div + div { border-left: 0; }
+.jr-glance .k { color: var(--muted); font-weight: 800; letter-spacing: .08em; font-size: 12.5px; text-transform: uppercase; }
+.jr-glance .v { font: 900 38px/1.1 "Arial Black", "Helvetica Neue", Arial, sans-serif; margin: 12px 0 4px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.jr-glance .c { color: var(--muted); font-size: 12.5px; }
+.jr-log { width: 100%; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.jr-log th { background: var(--jhead); color: #fff; font-weight: 800; padding: 11px 10px; white-space: nowrap; font-size: 13.5px; text-align: center; }
+.jr-log td { background: var(--jcell); padding: 10px; border-bottom: 2px solid var(--surface); white-space: nowrap; }
+.jr-log td.pnl { background: var(--surface); border-bottom-color: var(--grid); }
+.jr-log .c { text-align: center; } .jr-log .r { text-align: right; }
+.jr-log small { display: block; color: var(--muted); font-size: 11.5px; }
+.jr .neg { color: var(--neg-text); }
+.jr ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+@media (max-width: 720px) { .jr-glance { grid-template-columns: 1fr; } .jr-glance > div + div { border-left: 1px solid var(--grid); } .jr-box { grid-template-columns: 1fr 110px; } }
 .sched { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; font-size: 12.5px; }
 .sched .ok { color: var(--pos-text); } .sched .bad { color: var(--neg-text); }
 
@@ -558,8 +585,8 @@ function ladder(p) {
   }, 50);
 }
 
-/* Structure-TF candles with the whole setup drawn on: pool swept, raid extreme, MSS level, dealing range
-   (EQ + the tradable half), POI zone, entry / stop / target. Up candles hollow, down candles solid. */
+/* Structure-TF candles with the whole setup drawn on: pool swept, raid extreme, MSS level, C2/C3 closure,
+   dealing range (EQ + the tradable half), POI zone, entry / stop / target. Up candles hollow, down candles solid. */
 function candleChart(s) {
   const H = 340;
   return chartHost((host, W) => {
@@ -605,7 +632,12 @@ function candleChart(s) {
     // raid / swing extreme marker
     const ex = idxOf(s.raid.ext_ts), ey = Y(s.raid.extreme) + (long ? 12 : -12);
     svg.append(sv('path', { d: long ? `M${X(ex)},${ey - 7}l5,8h-10z` : `M${X(ex)},${ey + 7}l5,-8h-10z`, fill: 'var(--ink)' }));
-    svg.append(sv('text', { x: X(ex), y: ey + (long ? 12 : -10), fill: 'var(--ink-2)', 'font-size': 10.5, 'text-anchor': 'middle' }, s.raid.kind === 'raid' ? 'raid' : 'CISD'));
+    svg.append(sv('text', { x: X(ex), y: ey + (long ? 12 : -10), fill: 'var(--ink-2)', 'font-size': 10.5, 'text-anchor': 'middle' }, (s.raid.kind === 'raid' ? 'raid' : 'CISD') + (s.candle && s.candle.kind ? ' · ' + s.candle.kind : '')));
+    // step 5: C1's low (high for shorts) from C1 to the candle that closed back inside it (dashed); the raid label names C2 / C3
+    if (s.candle && s.candle.kind) {
+      const c1 = idxOf(s.candle.c1_ts), cc = idxOf(s.candle.close_ts);
+      svg.append(sv('line', { x1: X(c1) - step / 2, x2: X(cc) + step / 2, y1: Y(s.candle.level), y2: Y(s.candle.level), stroke: 'var(--ink-2)', 'stroke-width': 1, 'stroke-dasharray': '3 2' }));
+    }
     // price levels with right-gutter labels (leader lines keep them attached when they crowd)
     const lines = [
       { v: s.target, t: 'TP ' + px(s.target), c: 'var(--pos)', w: 1.5 },
@@ -750,8 +782,8 @@ function signalRows(list, limit) {
 function funnelItems() {
   const f = (S.signals && S.signals.funnel) || null;
   if (!f) return [];
-  const st = [['trigger', 'raid / CISD'], ['shift', 'MSS'], ['armed', 'POI armed'], ['in-zone', 'in-zone'], ['signal', 'signal']];
-  return st.map(([k, lab], i) => ({ label: lab, value: f[k] || 0, color: `var(--f${i + 1})`, text: String(f[k] || 0), sub: `${pct((f[k] || 0) / (f.universe || 1), 1, false)} of ${f.universe} coins` }));
+  const st = [['trigger', 'raid / CISD'], ['shift', 'MSS'], ['closure', 'C2/C3 closure'], ['armed', 'zone armed'], ['in-zone', 'in-zone'], ['signal', 'signal']];
+  return st.map(([k, lab]) => ({ label: lab, value: f[k] || 0, color: 'var(--accent)', text: String(f[k] || 0), sub: `${pct((f[k] || 0) / (f.universe || 1), 1, false)} of ${f.universe} coins` }));
 }
 function viewOverview() {
   const sig = S.signals || {}, g = h('div', { class: 'grid' });
@@ -923,13 +955,13 @@ function viewPerformance() {
   g.append(card('Win rate by setup family', 'sweep-* FVG · unicorn-* breaker ∩ FVG · OB-*', () => h('div', null, hbars(famItems, { max: 100, track: true, labelW: 78, valueW: 118, label: 'win rate by setup family', rowH: 30 }),
       h('div', { class: 'tw', style: 'margin-top:10px' }, table(['Family', { t: 'Trades', r: 1 }, { t: 'Exp.', r: 1 }, { t: 'Net', r: 1 }], fam.map(({ f, s: s2 }) => ({ cells: [f, String(s2.n), R(s2.exp), signed(usd(s2.net, true), s2.net)] }))))),
     { span: 's4', key: 'fam', table: () => table(['Family', { t: 'Trades', r: 1 }, { t: 'Win rate', r: 1 }, { t: 'Expectancy', r: 1 }, { t: 'Net', r: 1 }], fam.map(({ f, s: s2 }) => ({ cells: [f, String(s2.n), s2.win == null ? '—' : pct(s2.win, 1, false), R(s2.exp), signed(usd(s2.net, true), s2.net)] }))) }));
-  const groups = [['tier', 'Tier'], ['trigger', 'Trigger'], ['direction', 'Side'], ['tag', 'Tag']];
-  const brows = [];
+  const groups = [['tier', 'Tier'], ['trigger', 'Trigger'], ['closure', 'Closure'], ['entry_kind', 'Entry'], ['fvgc', 'FVG combo'], ['direction', 'Side'], ['tag', 'Tag']];
+  const brows = [], tx = trades.map(t => Object.assign({}, t, { fvgc: t.fvg ? '+FVG' : 'no FVG', entry_kind: ({ close: 'series close', fvg: 'FVG retest' })[t.entry_kind] || '—', closure: t.closure || '—' }));
   for (const [k, lab] of groups) {
-    const keys = [...new Set(trades.map(t => t[k]))].sort();
-    for (const v of keys) { const s2 = statsOf(trades.filter(t => t[k] === v)); brows.push({ cells: [lab, v, String(s2.n), s2.win == null ? '—' : pct(s2.win, 1, false), R(s2.exp), s2.pf == null ? '—' : s2.pf.toFixed(2), signed(usd(s2.net, true), s2.net)] }); }
+    const keys = [...new Set(tx.map(t => t[k]))].sort();
+    for (const v of keys) { const s2 = statsOf(tx.filter(t => t[k] === v)); brows.push({ cells: [lab, v, String(s2.n), s2.win == null ? '—' : pct(s2.win, 1, false), R(s2.exp), s2.pf == null ? '—' : s2.pf.toFixed(2), signed(usd(s2.net, true), s2.net)] }); }
   }
-  g.append(card('Breakdown', 'win rates compared across tiers, triggers, sides and tags', () => h('div', { class: 'tw scroll', style: 'max-height:360px' }, table(['By', 'Value', { t: 'Trades', r: 1 }, { t: 'Win', r: 1 }, { t: 'Exp.', r: 1 }, { t: 'PF', r: 1 }, { t: 'Net', r: 1 }], brows, { empty: 'No closed trades in this range.' })), { span: 's12' }));
+  g.append(card('Breakdown', 'win rates compared across tiers, triggers, C2/C3 closures, entry types, FVG combo, sides and tags', () => h('div', { class: 'tw scroll', style: 'max-height:360px' }, table(['By', 'Value', { t: 'Trades', r: 1 }, { t: 'Win', r: 1 }, { t: 'Exp.', r: 1 }, { t: 'PF', r: 1 }, { t: 'Net', r: 1 }], brows, { empty: 'No closed trades in this range.' })), { span: 's12' }));
   g.append(card('Closed trades', `${trades.length} in range · newest first`, () => h('div', { class: 'tw scroll' }, table(['Closed (MYT)', 'Symbol', 'Side', 'Setup', 'Exit', { t: 'Hold', r: 1 }, { t: 'Entry', r: 1 }, { t: 'Exit px', r: 1 }, { t: 'Fees', r: 1 }, { t: 'R', r: 1 }, { t: 'Net', r: 1 }],
     trades.slice().reverse().map(t => ({ cells: [fShort(t.closed_at), h('span', { class: 'sym', text: t.symbol }), dirTag(t.direction), t.tag, t.exit_reason, t.hold_h.toFixed(1) + 'h', px(t.entry), px(t.exit_price), usd(-t.fees, true), signed(R(t.r_mult), t.r_mult), signed(usd(t.net_pnl, true), t.net_pnl)] })),
     { empty: 'No closed trades in this range.' })), { span: 's12' }));
@@ -975,6 +1007,29 @@ function markdown(md) {
   }
   return root;
 }
+const money = x => (x < -0.004999 ? '−' : '') + Math.abs(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function journalPage(v) {
+  const root = h('div', { class: 'jr' }), box = (k, val) => h('div', { class: 'jr-box' }, h('span', { text: k }), h('b', { text: val }));
+  root.append(h('div', { class: 'jr-top' }, h('div', null, h('div', { class: 'jr-title', text: v.title }), h('p', { class: 'jr-sub', text: v.subtitle })),
+    h('div', { class: 'jr-boxes' }, box('Market day', v.date_label), box('Currency', v.currency))));
+  root.append(h('div', { class: 'jr-h', text: 'At a glance' }), h('div', { class: 'jr-glance' },
+    h('div', null, h('div', { class: 'k', text: `Total P&L (${v.currency})` }), h('div', { class: 'v' + (v.total_pnl < -0.004999 ? ' neg' : ''), text: money(v.total_pnl) })),
+    h('div', null, h('div', { class: 'k', text: 'Entries' }), h('div', { class: 'v', text: String(v.entries) }), h('div', { class: 'c', text: 'rows filled in' }))));
+  root.append(h('div', { class: 'jr-h', text: v.title }));
+  if (v.rows.length) {
+    const cur = v.currency, head = ['Date', 'Ticker', 'Side', 'Size', `Entry (${cur})`, `Exit (${cur})`, `P&L (${cur})`];
+    const tb = h('tbody', null, v.rows.map(r => h('tr', null,
+      h('td', { class: 'c' }, r.date, h('small', { text: r.time + ' MYT' })), h('td', { class: 'c', text: r.ticker }), h('td', { class: 'c', text: r.side }),
+      h('td', { class: 'r', text: Number(r.size).toLocaleString('en-US', { maximumSignificantDigits: 6 }) }), h('td', { class: 'r', text: px(r.entry) }),
+      h('td', { class: 'r', text: px(r.exit) }), h('td', { class: 'r pnl' }, h('span', { class: r.pnl < -0.004999 ? 'neg' : '', text: money(r.pnl) })))));
+    root.append(h('div', { class: 'tw' }, h('table', { class: 'jr-log' }, h('thead', null, h('tr', null, head.map(t => h('th', { text: t })))), tb)));
+    root.append(h('div', { class: 'jr-h small', text: 'Trade notes' }), h('div', { class: 'tw' }, table(['Ticker', 'Setup', 'Closure', 'Entry', 'Exit', { t: 'R', r: 1 }],
+      v.rows.map(r => ({ cells: [r.ticker, r.tag, r.closure || '—', r.entry_kind + (r.fvg ? ' +FVG' : ''), r.reason, signed(R(r.r), r.r)] })))));
+  } else root.append(h('div', { class: 'empty', text: 'No trades closed this market day.' }));
+  root.append(h('div', { class: 'jr-h small', text: 'Day notes' }), h('ul', null, (v.notes.length ? v.notes : ['—']).map(n => h('li', { text: n }))));
+  root.append(h('p', { class: 'muted', style: 'font-size:12px;margin-top:12px', text: `${v.window} · ${v.mode} · updated ${v.updated} MYT · journal/${v.date}.html` }));
+  return root;
+}
 function viewJournal() {
   const j = S.journal || { days: [], entries: {} }, g = h('div', { class: 'grid' });
   const days = j.days.filter(d => j.entries[d]);
@@ -982,8 +1037,9 @@ function viewJournal() {
   const left = h('section', { class: 'card s8' });
   const sel = h('div', { class: 'days' });
   for (const d of days) { const b = h('button', { class: 'fbtn', type: 'button', 'aria-pressed': String(d === UI.day), text: d }); b.addEventListener('click', () => { UI.day = d; renderView(); }); sel.append(b); }
-  left.append(h('div', { class: 'card-h' }, h('div', { class: 'card-t', text: 'Journal' }), h('div', { class: 'card-s', text: 'journal/YYYY-MM-DD.md · one per market day, even with zero trades' })), sel,
-    UI.day ? markdown(j.entries[UI.day]) : h('div', { class: 'empty', text: 'No journal yet — it is written after the first job runs.' }));
+  const view = UI.day && (j.views || {})[UI.day];
+  left.append(h('div', { class: 'card-h' }, h('div', { class: 'card-t', text: 'Journal' }), h('div', { class: 'card-s', text: 'one per market day (07:00 → 07:00 MYT), even with zero trades' })), sel,
+    view ? journalPage(view) : UI.day ? markdown(j.entries[UI.day]) : h('div', { class: 'empty', text: 'No journal yet — it is written after the first job runs.' }));
   g.append(left);
   const right = h('section', { class: 'card s4' }, h('div', { class: 'card-h' }, h('div', { class: 'card-t', text: 'Event log' }), h('div', { class: 'card-s', text: 'state/events.jsonl' })),
     h('div', { class: 'scroll', style: 'max-height:720px' }, feed(S.events.slice().reverse())));

@@ -25,6 +25,7 @@ def filler(n=25, base=99.0):
 
 # Long setup after the filler (F = offset): pool 95.0 swept to 94.0 and reclaimed, structure shift
 # through the 102.0 lower-high, bullish FVG 97.4–98.6 left by the displacement, price back in discount.
+# Step 5 is a C3 closure: the raid candle (C2) closed 96.0, below C1's low 96.8; C3 closed 98.8.
 LONG_TAIL = [
     (100.0, 100.5, 98.5, 99.0), (99.0, 99.3, 96.5, 97.0), (97.0, 97.5, 95.5, 96.0),
     (96.0, 96.6, 95.0, 96.4),                              # F+3  swing low 95.0 (the pool)
@@ -47,9 +48,9 @@ def long_scenario():
     now = S[-1].ts + H4 + 20 * tu.MIN                       # 20 min into the next 4H candle
     e0 = now - 5 * tu.MIN - 4 * M15                         # last 15m candle closed 5 min ago
     E = bars([(98.6, 98.7, 98.2, 98.3), (98.3, 98.4, 97.9, 98.0), (98.1, 98.2, 97.8, 97.9),
-              (97.95, 98.45, 97.9, 98.4)], e0, M15)          # last closed 15m: solid bull body in POI
-    daily = bars([(100.0, 108.0, 92.0, 101.0), (101.0, 110.0, 93.0, 100.0)],
-                 tu.midnight(now) - 2 * tu.DAY, tu.DAY)
+              (97.95, 98.75, 97.9, 98.7)], e0, M15)          # 3 down-closes into the FVG (series top 98.6),
+    daily = bars([(100.0, 108.0, 92.0, 101.0), (101.0, 110.0, 93.0, 100.0)],   # then a solid bull body
+                 tu.midnight(now) - 2 * tu.DAY, tu.DAY)                       # closes above it
     return S, E, daily, now, 98.3
 
 
@@ -91,6 +92,6 @@ def cisd_scenario():
     S = bars(staircase() + CISD_TAIL, T0, H4)
     now = S[-1].ts + H4 + 20 * tu.MIN
     e0 = now - 5 * tu.MIN - 2 * M15
-    E = bars([(102.0, 102.1, 101.6, 101.7), (101.7, 102.0, 101.6, 101.95)], e0, M15)
+    E = bars([(102.0, 102.1, 101.6, 101.7), (101.7, 102.15, 101.6, 102.1)], e0, M15)   # series 102.0 → close 102.1
     daily = bars([(100.0, 108.0, 92.0, 101.0), (101.0, 110.0, 93.0, 100.0)], tu.midnight(now) - 2 * tu.DAY, tu.DAY)
     return S, E, daily, now, 101.9

@@ -3,7 +3,7 @@
 
   scan      routine 1 (top 20 movers + 20 losers, vol ≥ $1M) + Module A (liquidity sweeps) +
             routine 2 (PDH/PDL daily failure, research only) → Telegram + Gmail
-  signals   the v4 engine over ALL coins → signals_live.json (signals + in-zone watch) → Telegram + Gmail
+  signals   the v5 engine over ALL coins → signals_live.json (signals + in-zone watch) → Telegram + Gmail
   cycle     scan → signals → trade (what the daemon runs every 4 hours)
   trade     every 30 min: enter ONLY coins listed in signals_live.json, re-validated live
   manage    ~every 5 min: R-ladder + 48h time-stop on open positions
@@ -244,11 +244,12 @@ def job_scan(ctx: Ctx, cache: Optional[CandleCache] = None) -> dict:
 
 
 def _rank(s: dict) -> tuple:
-    return (0 if s["status"] == "signal" else 1, s["tier"], -s["rr"])
+    """Signals before in-zone, then +FVG (the entry move left an entry-TF FVG), then tier, then reward:risk."""
+    return (0 if s["status"] == "signal" else 1, 0 if s.get("fvg") else 1, s["tier"], -s["rr"])
 
 
 def job_signals(ctx: Ctx, cache: Optional[CandleCache] = None) -> dict:
-    """The v4 engine over ALL coins → signals_live.json = signals + in-zone watch."""
+    """The v5 engine over ALL coins → signals_live.json = signals + in-zone watch."""
     now = ctx.now()
     tickers, excluded = get_universe(ctx)
     cache = cache or CandleCache(ctx.md, now)
@@ -368,6 +369,7 @@ def job_trade(ctx: Ctx) -> List[dict]:
             st["traded_setups"][s.setup_id] = now
             ctx.store.save_state(st)
             ev = ctx.store.event("entry", now, id=pos["id"], symbol=sym, direction=s.direction, tag=s.tag, tier=s.tier,
+                                 closure=s.closure, entry_kind=s.entry_kind, fvg=s.fvg,
                                  struct_tf=s.struct_tf, entry_tf=s.entry_tf, entry=pos["entry"], stop=pos["stop"],
                                  target=pos["target"], qty=pos["qty"], risk_usd=pos["risk_usd"],
                                  risk_pct=pos["r_price"] / pos["entry"], rr=(pos["target"] - pos["entry"]) * pos["dir"] / pos["r_price"],
@@ -657,7 +659,7 @@ def fmt_signals(ctx: Ctx, p: dict, armed: int) -> tuple:
 
     def lines(items):
         return [f"{'SYMBOL':<11}{'D':>2} {'SETUP':<16}{'ENTRY':>11}{'STOP':>11}{'TARGET':>11}{'RR':>5}"] + [
-            f"{s['symbol'][:11]:<11}{s['direction'][0].upper():>2} {s['tag'][:16]:<16}{px(s['entry']):>11}"
+            f"{s['symbol'][:11]:<11}{s['direction'][0].upper():>2} {s['tag'][:18]:<18}{px(s['entry']):>11}"
             f"{px(s['stop']):>11}{px(s['target']):>11}{s['rr']:>5.1f}" for s in items]
 
     st = ctx.store.load_state()
@@ -684,7 +686,10 @@ def fmt_signals(ctx: Ctx, p: dict, armed: int) -> tuple:
 
 
 def fmt_entry(ctx: Ctx, e: dict) -> str:
+    how = {"close": "series close", "fvg": "FVG retest"}.get(e.get("entry_kind", ""), "")
+    combo = " · +FVG" if e.get("fvg") else ""
     return (f"🟢 <b>ENTRY</b> {esc(e['symbol'])} {e['direction'].upper()} · {esc(e['tag'])} · {ctx.label}\n"
+            f"{e.get('closure', '?')} closure · {how}{combo}\n"
             f"entry {px(e['entry'])} · stop {px(e['stop'])} ({e['risk_pct']:.2%}) · target {px(e['target'])} "
             f"({e['rr']:.2f}R)\nqty {e['qty']:.6g} · 1R {usd(e['risk_usd'])}")
 
@@ -710,7 +715,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     common.add_argument("--mode", choices=("paper", "demo", "live"), default=argparse.SUPPRESS, help="override TRADING_MODE")
     common.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS, help="no Telegram/Gmail (outbox only)")
     common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
-    ap = argparse.ArgumentParser(description="AI Trading Terminal — v4 sweep-reversal bot (Bitget USDT-M, DEMO by default)",
+    ap = argparse.ArgumentParser(description="AI Trading Terminal — v5 sweep-reversal bot (Bitget USDT-M, DEMO by default)",
                                  parents=[common])
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, text in (("scan", "routine 1 + Module A + routine 2"), ("signals", "framework-signal scan (all coins)"),
