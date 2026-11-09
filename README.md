@@ -145,6 +145,11 @@ single function, so it's easy to change.
 
 ## Files and outputs
 
+The daily journal (`journal/YYYY-MM-DD.html`, also in the dashboard's Journal tab) follows the journal
+design: At a glance (total P&L, entries), then the trade log with net P&L per trade.
+
+![Daily journal](docs/journal.png)
+
 ```
 run_bot.py          jobs, daemon, replay, CLI          strategy.py      the v5 engine
 paper_bot.py        protection shell + R-ladder         sweep_screen.py  Module A
