@@ -9,6 +9,8 @@ cache/
 sim/
 replay/
 dashboard/index.html
+# trader-skill pack data: portfolio, budget, orders, broker log, SEC user agent (name + email)
+trader/
 
 # python
 __pycache__/
