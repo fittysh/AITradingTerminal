@@ -265,7 +265,7 @@ class BitgetPublic(MarketData):
             first = page[0].ts
             if first <= start_ms or first >= end:
                 break
-            end = first - 1
+            end = first  # endTime is exclusive (candles open before it); first - 1 skipped a bar per page
         return [out[k] for k in sorted(out) if start_ms <= k <= end_ms]
 
 

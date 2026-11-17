@@ -96,6 +96,24 @@ class Bitget(unittest.TestCase):
         k = pub.contracts()["BTCUSDT"]
         self.assertEqual((k.tick, k.round_qty(0.0049), k.round_price(65000.26, "down")), (0.1, 0.004, 65000.2))
 
+    def test_history_pages_without_gaps(self):
+        """Bitget's history-candles endTime is exclusive at the bar level (bars that open before the
+        bar containing endTime). Paging must not skip the bar just before each page's first bar."""
+        import urllib.parse
+        step, n = 5 * tu.MIN, 1000
+        t0 = NOW // step * step - n * step
+        bars = [t0 + i * step for i in range(n)]
+
+        def hist(url, body):
+            q = dict(urllib.parse.parse_qsl(url.split("?", 1)[1]))
+            cut = int(q["endTime"]) // step * step
+            rows = [b for b in bars if b < cut][-int(q["limit"]):]
+            return [[str(b), "1", "2", "0.5", "1.5", "10", "15"] for b in reversed(rows)]
+
+        pub = BitgetPublic(transport=FakeHttp({"/api/v2/mix/market/history-candles": hist}), rps=1000)
+        got = [c.ts for c in pub.history("BTCUSDT", "5m", t0, bars[-1] + step)]
+        self.assertEqual(got, bars)
+
     def test_private_signing_and_demo_header(self):
         http = FakeHttp({"/api/v2/mix/order/place-order": {"orderId": "1"}})
         cli = BitgetPrivate("k", "s3cret", "pp", demo=True, transport=http, rps=1000)
