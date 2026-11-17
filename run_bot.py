@@ -584,6 +584,7 @@ def replay(days: float, source: str = "sim", home: Optional[str] = None, seed: i
     rep = bitget_report.build(st, start, end, end, ctx.label, f"replay {tu.date_str(start)} → {tu.date_str(end)}")
     files = bitget_report.render_all(rep, paths.reports, f"replay_{tu.fmt(start, '%Y%m%d')}_{tu.fmt(end, '%Y%m%d')}")
     dashboard.write(ctx)
+    rep["window"], rep["symbols"], rep["gaps"] = [start, end], list(md.symbols()), list(getattr(md, "gaps", []))
     s = rep["stats"]
     log.info("replay done in %.0fs · %d trades · win %s · expectancy %s · PF %s · net %s · report %s",
              time.time() - t0, s["trades"], pct(s["win_rate"], 1, False) if s["win_rate"] is not None else "—",
@@ -737,6 +738,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     rpl.add_argument("--source", choices=("sim", "bitget"), default="sim")
     rpl.add_argument("--symbols", nargs="*", help="bitget source: symbols to replay (default: top by volume)")
     rpl.add_argument("--top", type=int, default=40)
+    vp = sub.add_parser("validate", help="replay, then re-check every entry against the framework and apply "
+                                         "the proof rule (use --source bitget for real history)", parents=[common])
+    vp.add_argument("--days", type=float, default=30)
+    vp.add_argument("--source", choices=("sim", "bitget"), default="sim")
+    vp.add_argument("--symbols", nargs="*", help="bitget source: symbols to replay (default: top by volume)")
+    vp.add_argument("--top", type=int, default=30)
     args = ap.parse_args(argv)
     # defaults filled after parsing: set_defaults() would leak into the shared parent actions
     for key, value in (("home", None), ("sim", False), ("seed", 7), ("mode", None), ("quiet", False), ("verbose", False)):
@@ -746,6 +753,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "replay":
         replay(args.days, args.source, args.home, args.seed, args.symbols, args.top)
         return 0
+    if args.cmd == "validate":
+        import validate
+        res = validate.run(args.days, args.source, args.home, args.seed, args.symbols, args.top, quiet=args.quiet)
+        print(res["text"])
+        print(f"report: {res['path']}")
+        return 0 if res["audit"]["clean"] else 1
     ctx = build_ctx(args.home, args.sim, args.seed, args.mode, args.quiet, console=args.cmd != "tui",
                     verbose=args.verbose)
     if args.cmd in ("scan", "signals", "cycle", "trade", "manage"):

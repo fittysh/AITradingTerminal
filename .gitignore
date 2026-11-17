@@ -8,6 +8,7 @@ reports/
 cache/
 sim/
 replay/
+validate/
 dashboard/index.html
 # trader-skill pack data: portfolio, budget, orders, broker log, SEC user agent (name + email)
 trader/

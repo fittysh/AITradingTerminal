@@ -135,6 +135,12 @@ Journal tab shows the same layout.
 Live trading is locked until at least 30 closed trades show a positive net result with a profit
 factor of at least 1.2, and the confirmation phrase is set.
 
+## Proof before trusting it
+`python run_bot.py validate --source bitget --days 30` (validate.py) replays real Bitget history and
+reports two things separately: whether every entry followed the seven steps and the risk rules
+(re-checked from the raw candles), and whether the result passes the same bar as the live lock
+(≥ 30 closed trades, net > 0, profit factor ≥ 1.2). A synthetic replay can only answer the first.
+
 ## Open items (from the v4 review — not decided yet, so the bot keeps v4's behaviour)
 - No cap on position size: one trade can reach $312.50, and five can total $1,562.50.
 - The 10× leverage is set only in the code's config, not in the framework.

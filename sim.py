@@ -352,6 +352,7 @@ class HistoricalMarket(SeriesMarket):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.log = log
+        self.gaps: List[dict] = []            # symbol/TF histories that do not cover the requested window
         all_contracts = public.contracts()
         self._contracts = {s: all_contracts[s] for s in self.syms if s in all_contracts}
 
@@ -365,12 +366,31 @@ class HistoricalMarket(SeriesMarket):
         start = self.start - self.WARMUP.get(tf, 2 * tu.DAY)
         path = self.cache_dir / f"{sym}_{tf}_{start}_{self.end}.json"
         if path.is_file():
-            return [Candle(*row) for row in json.loads(path.read_text())]
-        if self.log:
-            self.log.info("history %s %s (%s → %s)", sym, tf, tu.fmt(start), tu.fmt(self.end))
-        rows = self.public.history(sym, tf, start, self.end)
-        path.write_text(json.dumps([list(c) for c in rows]))
+            rows = [Candle(*row) for row in json.loads(path.read_text())]
+        else:
+            if self.log:
+                self.log.info("history %s %s (%s → %s)", sym, tf, tu.fmt(start), tu.fmt(self.end))
+            rows = self.public.history(sym, tf, start, self.end)
+            path.write_text(json.dumps([list(c) for c in rows]))
+        self._coverage(sym, tf, start, rows)
         return rows
+
+    def _coverage(self, sym: str, tf: str, start: int, rows: Sequence[Candle]) -> None:
+        """Record (and log) a history that starts late, ends early or misses more than 2% of its candles —
+        e.g. when Bitget does not serve that much history for a small timeframe."""
+        step = tf_ms(tf)
+        want = max(1, (self.end - start) // step)
+        late = not rows or rows[0].ts > start + step
+        early = not rows or rows[-1].ts + 2 * step < self.end
+        thin = len(rows) < 0.98 * want
+        if late or early or thin:
+            gap = {"symbol": sym, "tf": tf, "wanted": [start, self.end], "candles": len(rows), "expected": want,
+                   "from": rows[0].ts if rows else None, "to": rows[-1].ts if rows else None}
+            self.gaps.append(gap)
+            if self.log:
+                self.log.warning("history %s %s covers %s → %s with %d of %d candles (wanted %s → %s)", sym, tf,
+                                 tu.fmt(gap["from"]), tu.fmt(gap["to"]), len(rows), want, tu.fmt(start),
+                                 tu.fmt(self.end))
 
     def _load_base(self, sym: str) -> List[Candle]:
         return self._fetch(sym, BASE_TF)

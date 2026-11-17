@@ -70,6 +70,7 @@ Global options work before or after the command: `--sim` (synthetic market, data
 | `tui [--run]` | Terminal UI; `--run` embeds the daemon |
 | `status` | One-shot colour snapshot (works on any terminal, no curses) |
 | `replay --days N [--source sim\|bitget]` | Fast-forward the complete bot over past days, no lookahead |
+| `validate --days N [--source sim\|bitget]` | Replay, then re-check every entry against the framework rules and apply the proof rule → `reports/validate_*.md` |
 
 ### Schedule (MYT, UTC+8)
 
@@ -157,6 +158,7 @@ bitget_report.py    net-of-fees report (md/html/pdf)    journal.py       journal
 exchange.py         Bitget public + signed REST         bitget_broker.py demo/live execution
 sim.py              synthetic + historical replay mkts  dashboard.py     snapshot, HTML, server
 tui.py              terminal UI + `status`              notify.py        Telegram + Gmail
+validate.py         rule audit + proof rule (`validate`)
 store.py · schedule.py · timeutil.py · config.py · util.py · pdfgen.py
 dashboard/template.html   the dashboard front end (vanilla JS/SVG, no CDN)
 
@@ -211,8 +213,16 @@ at start-up, and the paper ladder replays the candles it missed.
 
 ## Validation workflow (from demo to live)
 
-1. `python run_bot.py replay --source bitget --days 30 --top 40` replays real Bitget history, with
-   candles cached under `replay/cache/`. The report breaks results down by family, tier, trigger, C2/C3 closure and entry type.
+1. `python run_bot.py validate --source bitget --days 30 --top 30` replays real Bitget history (needs
+   `api.bitget.com` on the network allowlist) and answers two questions separately:
+   - **Does the bot follow the framework?** Every entry is re-checked from the raw candles at its open
+     time, rule by rule (listed by the scan, the seven steps, stop and target, 1R, the daily limits),
+     without trusting the engine's own checklist.
+   - **Does the framework make money?** The proof rule: at least 30 closed trades, net above zero and
+     a profit factor of at least 1.2. Only real history answers this; on `--source sim` the report says
+     so, because the synthetic market is a random walk.
+   It also lists any coin or timeframe whose Bitget history is shorter than the window. Candles are
+   cached under `validate/cache/`, so a re-run is offline.
 2. Paper or demo trade the daemon until the record is meaningful.
 3. Live is only accepted when `LIVE_CONFIRM=I-ACCEPT-LIVE-RISK` is set **and** the edge gate passes
    on this home's closed trades: at least 30 trades, positive net and expectancy, and PF ≥ 1.2
@@ -221,7 +231,7 @@ at start-up, and the paper ladder replays the candles it missed.
 ## Testing
 
 ```bash
-python -m unittest discover -s tests -t .    # 61 tests, ~15 s, fully offline
+python -m unittest discover -s tests -t .    # 90 tests, ~1 min, fully offline
 ```
 
 The suite covers:
@@ -230,6 +240,12 @@ The suite covers:
 - Bitget request signing and parsing (fake transport);
 - the synthetic market's no-lookahead guarantee;
 - the PDF writer;
+- the independent audit (`validate.py`): a real replay passes every rule, and each kind of broken entry
+  (wrong closure, wrong entry candle or series, entry outside discount/premium, zone in the wrong
+  half, stop inside the raid, oversized risk, late reclaim, unlisted coin, entry past the loss stop)
+  is caught;
+- the Bitget-history replay path against a fake Bitget that pages 200 candles at a time: it gives the
+  same trades as the synthetic replay of the same market, and short histories are reported;
 - an end-to-end replay that asserts the framework invariants: every entry was listed by the signal
   scan, positions never exceed 5 open or 3 per side, the accounting identities hold, and there is a
   journal for every market day.
