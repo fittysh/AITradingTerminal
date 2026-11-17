@@ -654,35 +654,84 @@ def fmt_scan(ctx: Ctx, scan: dict, sweeps: dict, dfail: dict) -> tuple:
     return f"Scan {when} MYT", tg, html
 
 
+def _why(s: dict) -> List[str]:
+    """What to check on the chart for one signal: the C2/C3 candle, the zone, the series and the entry candle,
+    with their candle times (MYT) and the timeframe each one is on."""
+    steps = {c["step"]: c["detail"] for c in s.get("checklist") or []}
+    cd, cf, ser = s.get("candle") or {}, s.get("confirm") or {}, s.get("series") or {}
+    out = [f"2 {steps.get(2, '')}",
+           f"5 {steps.get(5, '')}" + (f" · C1 {tu.fmt(cd['c1_ts'], '%m-%d %H:%M')}, closed by "
+                                      f"{tu.fmt(cd['close_ts'], '%m-%d %H:%M')} ({s['struct_tf']})" if cd else ""),
+           f"6 {steps.get(6, '')} ({s['struct_tf']})"]
+    if ser:
+        out.append(f"7 series {tu.fmt(ser['first_ts'], '%m-%d %H:%M')}–{tu.fmt(ser['last_ts'], '%H:%M')} ({ser['bars']} bar(s), "
+                   f"level {px(ser['level'])}) · {steps.get(7, '')}"
+                   + (f" · entry candle {tu.fmt(cf['ts'], '%m-%d %H:%M')} {cf.get('tf', s['entry_tf'])}" if cf else ""))
+    else:
+        out.append(f"7 {steps.get(7, '')}")
+    return out
+
+
+def _times(s: dict) -> str:
+    """One line of candle open times (MYT) to find a signal on the chart."""
+    cd, cf, ser = s.get("candle") or {}, s.get("confirm") or {}, s.get("series") or {}
+    parts = []
+    if cd:
+        parts.append(f"{s['struct_tf']} C1 {tu.fmt(cd['c1_ts'], '%m-%d %H:%M')}, {cd['kind']} closed back inside on the "
+                     f"{tu.fmt(cd['close_ts'], '%m-%d %H:%M')} candle")
+    if ser:
+        parts.append(f"{s['entry_tf']} series {tu.fmt(ser['first_ts'], '%m-%d %H:%M')}–{tu.fmt(ser['last_ts'], '%H:%M')} "
+                     f"(level {px(ser['level'])})")
+    if cf:
+        parts.append(f"entry candle {tu.fmt(cf['ts'], '%m-%d %H:%M')} {cf.get('tf', s['entry_tf'])}")
+    return "Candle times (open, MYT): " + " · ".join(parts) if parts else ""
+
+
 def fmt_signals(ctx: Ctx, p: dict, armed: int) -> tuple:
     when = tu.fmt(p["generated_at"])
     f = p["funnel"]
 
     def lines(items):
-        return [f"{'SYMBOL':<11}{'D':>2} {'SETUP':<16}{'ENTRY':>11}{'STOP':>11}{'TARGET':>11}{'RR':>5}"] + [
-            f"{s['symbol'][:11]:<11}{s['direction'][0].upper():>2} {s['tag'][:18]:<18}{px(s['entry']):>11}"
-            f"{px(s['stop']):>11}{px(s['target']):>11}{s['rr']:>5.1f}" for s in items]
+        return [f"{'SYMBOL':<11}{'D':>2} {'SETUP':<18}{'ENTRY':>12}{'STOP':>12}{'TARGET':>12}{'RR':>5}"] + [
+            f"{s['symbol'][:11]:<11}{s['direction'][0].upper():>2} {s['tag'][:18]:<18}{px(s['entry']):>12}"
+            f"{px(s['stop']):>12}{px(s['target']):>12}{s['rr']:>5.1f}" for s in items]
+
+    def head_line(s):
+        fvg = " · +FVG" if s.get("fvg") else ""
+        how = {"close": "series close", "fvg": "FVG retest"}.get(s.get("entry_kind", ""), s["status"])
+        return f"{s['symbol']} {s['direction'].upper()} · {s['tier']} {s['struct_tf']}→{s['entry_tf']} · {s['tag']} · {how}{fvg}"
 
     st = ctx.store.load_state()
     g = pb.gates(st, p["generated_at"])
     gl = (f"Gates: loss stop {'HIT' if g.loss_stop else 'ARMED'} · PROTECT {'ON' if g.protect else 'off'} · "
           f"open {g.open}/{pb.MAX_OPEN_POSITIONS} (L{g.longs}/S{g.shorts})")
     funnel = " → ".join(f"{k} {v}" for k, v in f.items())
+    why = ""
+    if p["signals"]:
+        why = "\n<b>Why — check these on the chart (candle open times, MYT)</b>\n" + "\n".join(
+            f"<b>{esc(head_line(s))}</b>\n" + "\n".join(esc(x) for x in _why(s)) for s in p["signals"][:10]) + "\n"
     tg = (f"🎯 <b>FRAMEWORK SIGNALS</b> · {esc(config.ENGINE)} · {when} MYT · {ctx.label}\n"
           f"{esc(funnel)}\n\n<b>Meet the framework ({len(p['signals'])})</b>\n"
-          + (_pre(lines(p["signals"][:15])) if p["signals"] else "none") +
-          f"\n<b>In-zone watch ({len(p['watch'])})</b> — in the POI, waiting for a solid-body entry candle\n"
+          + (_pre(lines(p["signals"][:15])) if p["signals"] else "none") + why +
+          f"\n<b>In-zone watch ({len(p['watch'])})</b> — price reached the zone, waiting for a ≥50% body close "
+          f"beyond the series\n"
           + (_pre(lines(p["watch"][:15])) if p["watch"] else "none") +
-          f"\nArmed (waiting for price to retrace to the POI): {armed}\n{esc(gl)}")
+          f"\nArmed (waiting for price to retrace to the zone): {armed}\n{esc(gl)}")
     head = ["Symbol", "Dir", "Setup", "Entry", "Stop", "Target", "RR"]
 
     def rows(items):
         return [[s["symbol"], s["direction"], s["tag"], px(s["entry"]), px(s["stop"]), px(s["target"]), s["rr"]]
                 for s in items]
 
+    detail = "".join(
+        f"<h4 style='margin:14px 0 4px'>{esc(head_line(s))}</h4><ol style='margin:0;padding-left:20px'>"
+        + "".join(f"<li><b>{esc(c['name'])}</b> — {esc(c['detail'])}</li>" for c in s.get("checklist") or [])
+        + "</ol><p style='margin:4px 0;color:#555'>" + esc(_times(s)) + "</p>"
+        for s in p["signals"][:20])
     html = (f"<div style='font-family:Segoe UI,Arial,sans-serif'><h2 style='margin:0'>Framework signals · {esc(when)} MYT"
             f"</h2><p>{esc(funnel)}</p><h3>Meet the framework</h3>{_html_table(head, rows(p['signals']))}"
-            f"<h3>In-zone watch</h3>{_html_table(head, rows(p['watch']))}<p>Armed: {armed} · {esc(gl)}</p></div>")
+            + (f"<h3>Why each signal qualified (check on the chart; candle open times, MYT)</h3>{detail}" if detail else "")
+            + f"<h3>In-zone watch</h3>{_html_table(head, rows(p['watch']))}<p>Armed: {armed} · {esc(gl)}</p></div>")
     return f"Signals {when} MYT — {len(p['signals'])} signal(s)", tg, html
 
 
