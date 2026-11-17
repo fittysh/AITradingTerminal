@@ -189,7 +189,20 @@ Keys: `1-9` tabs · `↑↓/jk` move · `s` scan cycle · `g` signals · `t` tra
 
 ## Running it 24/7
 
-**Linux (systemd)**, as `/etc/systemd/system/aitt.service`:
+**On a server (Ubuntu/Debian, e.g. a DigitalOcean droplet)** — upload or clone the project, then from
+inside its folder:
+
+```bash
+sudo bash deploy/install.sh      # first run creates .env and stops: fill Telegram + Gmail, run it again
+```
+
+The second run checks Python, pulls the latest code, runs the tests, sends one signal scan to Telegram
+and Gmail so you can check it, and installs two services that start on boot: `aitt` (the 24/7 bot) and
+`aitt-dashboard` (the dashboard on `127.0.0.1:8787`, opened from your computer through
+`ssh -L 8787:127.0.0.1:8787 user@server`, then http://localhost:8787). Re-run it to update.
+Options: `--no-tests`, `--no-first-scan`, `--dry-run`.
+
+**Linux by hand (systemd)**, as `/etc/systemd/system/aitt.service`:
 
 ```ini
 [Unit]
