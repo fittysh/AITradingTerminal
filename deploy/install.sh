@@ -6,9 +6,9 @@
 #
 # It does, in order:
 #   1. checks Python (3.9+) and updates the code with `git pull` when the folder is a git checkout;
-#   2. creates .env from .env.example on the first run (then stops so you can fill in Telegram + Gmail);
+#   2. creates .env from .env.example on the first run (then stops so you can fill in Telegram + email);
 #   3. runs the offline test suite;
-#   4. runs one signal scan now, so the result reaches Telegram + Gmail and you can check it;
+#   4. runs one signal scan now, so the result reaches Telegram + email and you can check it;
 #   5. installs two systemd services that start on boot and restart on failure:
 #        aitt            the 24/7 bot: scan + signals every 4 h, entries every 30 min, management every
 #                        5 min, reports at 07:00 and 19:00 MYT (paper trading unless .env says otherwise)
@@ -60,7 +60,7 @@ if [ ! -f "$ENV_FILE" ]; then
   cat <<EOF
 Created $ENV_FILE from .env.example. Fill in these lines, then run this script again:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID       (bot from @BotFather; chat id from getUpdates)
-  GMAIL_USER, GMAIL_APP_PASSWORD, GMAIL_TO   (an App Password, not your Google login password)
+  BREVO_API_KEY, EMAIL_FROM, EMAIL_TO        (Brevo API key xkeysib-…; EMAIL_FROM = a sender verified in Brevo)
 Keep TRADING_MODE=paper: v5 has not passed the proof rule on real data yet.
 Edit with:  nano $ENV_FILE
 EOF
@@ -73,8 +73,14 @@ MODE="$(val TRADING_MODE)"; MODE="${MODE:-paper}"
 echo "trading mode: $MODE"
 [ -n "$(val TELEGRAM_BOT_TOKEN)" ] && [ -n "$(val TELEGRAM_CHAT_ID)" ] && echo "Telegram: set" \
   || echo "Telegram: NOT set — messages only go to state/outbox/"
-[ -n "$(val GMAIL_USER)" ] && [ -n "$(val GMAIL_APP_PASSWORD)" ] && [ -n "$(val GMAIL_TO)" ] && echo "Gmail: set" \
-  || echo "Gmail: NOT set — messages only go to state/outbox/"
+if [ -n "$(val BREVO_API_KEY)" ] && [ -n "$(val EMAIL_FROM)" ]; then
+  echo "Email: Brevo API (from $(val EMAIL_FROM))"
+elif [ -n "$(val SMTP_USER)$(val GMAIL_USER)" ] && [ -n "$(val SMTP_PASSWORD)$(val GMAIL_APP_PASSWORD)" ]; then
+  echo "Email: SMTP via $(val SMTP_HOST | grep . || echo smtp.gmail.com) — if mails never arrive, this server may block"
+  echo "       mail ports (DigitalOcean does): use the Brevo API instead (BREVO_API_KEY, EMAIL_FROM, EMAIL_TO)"
+else
+  echo "Email: NOT set — messages only go to state/outbox/"
+fi
 if [ "$MODE" = live ]; then
   echo "TRADING_MODE=live: the bot still refuses real orders unless LIVE_CONFIRM is set AND the edge gate passes."
 fi
@@ -96,9 +102,13 @@ else
 fi
 
 if [ "$FIRST_SCAN" = 1 ]; then
-  say "4/5 First signal scan → Telegram + Gmail (scans every coin; can take a few minutes)"
+  say "4/5 First signal scan → Telegram + email (scans every coin; can take a few minutes)"
+  LOGFILE="$APP_DIR/state/bot.log"
+  BEFORE="$( [ -f "$LOGFILE" ] && wc -l <"$LOGFILE" || echo 0)"
   if (cd "$APP_DIR" && as_user "$PY" run_bot.py signals); then
-    echo "sent — check Telegram and Gmail. A copy of every message is in $APP_DIR/state/outbox/"
+    echo "sent — check Telegram and your email. A copy of every message is in $APP_DIR/state/outbox/"
+    tail -n +"$((BEFORE + 1))" "$LOGFILE" | grep -E "telegram .*(rejected|failed)|email .*(rejected|failed)" \
+      | sed 's/^/delivery problem: /' | tail -3 || true
   else
     echo "the scan failed — see $APP_DIR/state/bot.log (is api.bitget.com reachable from this server?)" >&2
     exit 1

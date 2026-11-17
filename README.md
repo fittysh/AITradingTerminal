@@ -3,7 +3,7 @@
 Autonomous crypto-futures trading bot built on ICT / Smart Money Concepts, implementing
 [**FRAMEWORK.md** (v5 sweep-reversal + candle 2/3 closure)](FRAMEWORK.md) for Bitget USDT-M futures. It detects
 liquidity-sweep reversals (a stop raid or CISD, then a structure shift, premium/discount, and an
-FVG / Order Block / Unicorn entry), enforces a strict risk shell, and reports to Telegram and Gmail.
+FVG / Order Block / Unicorn entry), enforces a strict risk shell, and reports to Telegram and email.
 
 It ships with three ways to run and watch it:
 
@@ -35,7 +35,7 @@ into `sim/` (state, journals, reports with PDFs, dashboard), never into your pap
 ### 2. Paper-trade on live Bitget data (the default mode)
 
 ```bash
-cp .env.example .env                   # optional: Telegram + Gmail credentials
+cp .env.example .env                   # optional: Telegram + email (Brevo or Gmail) settings
 python run_bot.py cycle                # one scan → signals → trade pass, right now
 python run_bot.py daemon               # 24/7 on the MYT schedule (Ctrl+C / SIGTERM to stop)
 python run_bot.py tui --run            # the same daemon, inside the terminal UI
@@ -54,16 +54,16 @@ trailing plan are placed on the exchange, so the ladder works with the machine o
 ## Commands
 
 Global options work before or after the command: `--sim` (synthetic market, data in `./sim`),
-`--home DIR`, `--mode paper|demo|live`, `--quiet` (no Telegram/Gmail), `-v`.
+`--home DIR`, `--mode paper|demo|live`, `--quiet` (no Telegram/email), `-v`.
 
 | Command | Does |
 |---|---|
-| `scan` | Routine 1 (top 20 movers + 20 losers, 24h vol ≥ $1M, PDH/PDL state) + Module A sweeps + Routine 2 daily failure → Telegram + Gmail |
-| `signals` | The v5 engine over **all** coins → `state/signals_live.json` (signals + in-zone watch) → Telegram + Gmail |
+| `scan` | Routine 1 (top 20 movers + 20 losers, 24h vol ≥ $1M, PDH/PDL state) + Module A sweeps + Routine 2 daily failure → Telegram + email |
+| `signals` | The v5 engine over **all** coins → `state/signals_live.json` (signals + in-zone watch) → Telegram + email |
 | `cycle` | `scan` → `signals` → `trade` (what the daemon runs every 4 h) |
 | `trade` | Enter **only** coins listed in `signals_live.json`, each re-validated on fresh candles |
 | `manage` | R-ladder + 48h time-stop on open positions |
-| `report [--slot 07:00\|19:00]` | Net-of-fees report (markdown + PDF) → Telegram + Gmail |
+| `report [--slot 07:00\|19:00]` | Net-of-fees report (markdown + PDF) → Telegram + email |
 | `journal` · `dashboard` | Rewrite today's journal · `dashboard/index.html` |
 | `daemon` | Everything above on the schedule below, with catch-up after downtime |
 | `serve [--port 8787] [--run]` | Live dashboard, read-only; `--run` also runs the daemon |
@@ -157,7 +157,7 @@ paper_bot.py        protection shell + R-ladder         sweep_screen.py  Module 
 bitget_report.py    net-of-fees report (md/html/pdf)    journal.py       journal/YYYY-MM-DD.html|md
 exchange.py         Bitget public + signed REST         bitget_broker.py demo/live execution
 sim.py              synthetic + historical replay mkts  dashboard.py     snapshot, HTML, server
-tui.py              terminal UI + `status`              notify.py        Telegram + Gmail
+tui.py              terminal UI + `status`              notify.py        Telegram + Brevo/SMTP
 validate.py         rule audit + proof rule (`validate`)
 store.py · schedule.py · timeutil.py · config.py · util.py · pdfgen.py
 dashboard/template.html   the dashboard front end (vanilla JS/SVG, no CDN)
@@ -193,11 +193,11 @@ Keys: `1-9` tabs · `↑↓/jk` move · `s` scan cycle · `g` signals · `t` tra
 inside its folder:
 
 ```bash
-sudo bash deploy/install.sh      # first run creates .env and stops: fill Telegram + Gmail, run it again
+sudo bash deploy/install.sh      # first run creates .env and stops: fill Telegram + Brevo, run it again
 ```
 
 The second run checks Python, pulls the latest code, runs the tests, sends one signal scan to Telegram
-and Gmail so you can check it, and installs two services that start on boot: `aitt` (the 24/7 bot) and
+and email so you can check it, and installs two services that start on boot: `aitt` (the 24/7 bot) and
 `aitt-dashboard` (the dashboard on `127.0.0.1:8787`, opened from your computer through
 `ssh -L 8787:127.0.0.1:8787 user@server`, then http://localhost:8787). Re-run it to update.
 Options: `--no-tests`, `--no-first-scan`, `--dry-run`.

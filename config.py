@@ -134,11 +134,19 @@ SIGNALS_MAX_AGE_H = _env("SIGNALS_MAX_AGE_H", 8.0, float)   # trade ignores a st
 # --- notifications -------------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
+# email: the Brevo API when BREVO_API_KEY is set (HTTPS — works where a host blocks mail ports, as
+# DigitalOcean does), otherwise SMTP (Gmail by default; Brevo's SMTP relay works too)
+BREVO_API_KEY = _env("BREVO_API_KEY", "")
 GMAIL_USER = _env("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = _env("GMAIL_APP_PASSWORD", "").replace(" ", "")   # Google shows it as 4 groups of 4
 GMAIL_TO = _env("GMAIL_TO", "")
 SMTP_HOST = _env("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = _env("SMTP_PORT", 465, int)
+SMTP_PORT = _env("SMTP_PORT", 465, int)                  # 465 = SSL; any other port (587, 2525) = STARTTLS
+SMTP_USER = _env("SMTP_USER", "") or GMAIL_USER
+SMTP_PASSWORD = _env("SMTP_PASSWORD", "").replace(" ", "") or GMAIL_APP_PASSWORD
+EMAIL_FROM = _env("EMAIL_FROM", "") or GMAIL_USER      # Brevo: a sender verified in your Brevo account
+EMAIL_FROM_NAME = _env("EMAIL_FROM_NAME", "AI Trading Terminal")
+EMAIL_TO = _env("EMAIL_TO", "") or GMAIL_TO or EMAIL_FROM   # comma-separated for several addresses
 
 # --- paths / UI ----------------------------------------------------------------------------------
 BOT_HOME = Path(_env("BOT_HOME", str(ROOT)))

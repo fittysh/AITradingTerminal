@@ -2,12 +2,12 @@
 """run_bot.py — the 24/7 bot (FRAMEWORK.md → Core Responsibilities). Market day from 07:00 MYT.
 
   scan      routine 1 (top 20 movers + 20 losers, vol ≥ $1M) + Module A (liquidity sweeps) +
-            routine 2 (PDH/PDL daily failure, research only) → Telegram + Gmail
-  signals   the v5 engine over ALL coins → signals_live.json (signals + in-zone watch) → Telegram + Gmail
+            routine 2 (PDH/PDL daily failure, research only) → Telegram + email
+  signals   the v5 engine over ALL coins → signals_live.json (signals + in-zone watch) → Telegram + email
   cycle     scan → signals → trade (what the daemon runs every 4 hours)
   trade     every 30 min: enter ONLY coins listed in signals_live.json, re-validated live
   manage    ~every 5 min: R-ladder + 48h time-stop on open positions
-  report    07:00 & 19:00 MYT: net-of-fees report + PDF → Telegram + Gmail; journal every day
+  report    07:00 & 19:00 MYT: net-of-fees report + PDF → Telegram + email; journal every day
   daemon    all of the above on the MYT schedule, with catch-up after downtime
   replay    fast-forward the whole bot over past days (synthetic market or Bitget history)
   serve · tui · status · dashboard · journal — the UIs
@@ -763,7 +763,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     common.add_argument("--sim", action="store_true", default=argparse.SUPPRESS, help="synthetic market (offline)")
     common.add_argument("--seed", type=int, default=argparse.SUPPRESS, help="synthetic market seed")
     common.add_argument("--mode", choices=("paper", "demo", "live"), default=argparse.SUPPRESS, help="override TRADING_MODE")
-    common.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS, help="no Telegram/Gmail (outbox only)")
+    common.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS, help="no Telegram/email (outbox only)")
     common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
     ap = argparse.ArgumentParser(description="AI Trading Terminal — v5 sweep-reversal bot (Bitget USDT-M, DEMO by default)",
                                  parents=[common])

@@ -1,21 +1,27 @@
-"""notify.py — Telegram + Gmail delivery (stdlib only).
+"""notify.py — Telegram + email delivery (stdlib only).
 
 Telegram: Bot API sendMessage (HTML parse mode, split under the 4096-char limit without breaking
-<pre> blocks) and sendDocument (PDF). Gmail: SMTP over SSL with an app password.
+<pre> blocks) and sendDocument (PDF).
+Email: the Brevo transactional API (HTTPS, api-key header) when BREVO_API_KEY is set — it works on servers
+that block mail ports — otherwise SMTP: SSL on port 465 (Gmail with an app password), STARTTLS on any
+other port (Brevo's relay on 587 or 2525). PDFs go along as attachments either way.
 Every message is also written to state/outbox/ so the UI can show what was sent — and so nothing is
 lost when a channel is not configured (sim/replay runs never send anything).
 """
 from __future__ import annotations
 
+import base64
 import html
 import json
 import logging
 import smtplib
 import ssl
 import time
+import urllib.error
 import urllib.request
 import uuid
 from email.message import EmailMessage
+from email.utils import formataddr
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -23,6 +29,7 @@ import config
 import timeutil as tu
 
 TG_LIMIT = 3900
+BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 def esc(s) -> str:
@@ -55,14 +62,20 @@ def split_telegram(text: str, limit: int = TG_LIMIT) -> List[str]:
 class Notifier:
     def __init__(self, log: logging.Logger, outbox: Optional[Path] = None, enabled: bool = True,
                  token: str = config.TELEGRAM_BOT_TOKEN, chat_id: str = config.TELEGRAM_CHAT_ID,
-                 gmail_user: str = config.GMAIL_USER, gmail_password: str = config.GMAIL_APP_PASSWORD,
-                 gmail_to: str = config.GMAIL_TO, clock=tu.now_ms):
+                 brevo_key: str = config.BREVO_API_KEY, smtp_user: str = config.SMTP_USER,
+                 smtp_password: str = config.SMTP_PASSWORD, email_from: str = config.EMAIL_FROM,
+                 email_to: str = config.EMAIL_TO, email_from_name: str = config.EMAIL_FROM_NAME,
+                 smtp_host: str = config.SMTP_HOST, smtp_port: int = config.SMTP_PORT, clock=tu.now_ms):
         self.log = log
         self.outbox = outbox
         self.enabled = enabled
         self.token, self.chat_id = token, chat_id
-        self.gmail_user, self.gmail_password = gmail_user, gmail_password
-        self.gmail_to = gmail_to or gmail_user
+        self.brevo_key = brevo_key
+        self.smtp_user, self.smtp_password = smtp_user, smtp_password
+        self.smtp_host, self.smtp_port = smtp_host, int(smtp_port)
+        self.email_from = email_from or smtp_user
+        self.email_from_name = email_from_name
+        self.email_to = [a.strip() for a in (email_to or self.email_from or "").split(",") if a.strip()]
         self.clock = clock
 
     @property
@@ -70,11 +83,20 @@ class Notifier:
         return bool(self.enabled and self.token and self.chat_id)
 
     @property
+    def email_via(self) -> str:
+        """"brevo" (API), "smtp", or "" when email is off or not configured."""
+        if not (self.enabled and self.email_to and self.email_from):
+            return ""
+        if self.brevo_key:
+            return "brevo"
+        return "smtp" if self.smtp_user and self.smtp_password else ""
+
+    @property
     def has_email(self) -> bool:
-        return bool(self.enabled and self.gmail_user and self.gmail_password and self.gmail_to)
+        return bool(self.email_via)
 
     def channels(self) -> str:
-        on = [n for n, ok in (("telegram", self.has_telegram), ("gmail", self.has_email)) if ok]
+        on = [n for n, ok in (("telegram", self.has_telegram), (f"email ({self.email_via})", self.has_email)) if ok]
         return ", ".join(on) if on else "none (outbox only)"
 
     # -- public ------------------------------------------------------------------------------------
@@ -127,22 +149,58 @@ class Notifier:
         return False
 
     def _email(self, subject: str, body_html: str, attachments: List[Path]) -> bool:
+        if self.email_via == "brevo":
+            return self._brevo(subject, body_html, attachments)
+        return self._smtp(subject, body_html, attachments)
+
+    def _brevo(self, subject: str, body_html: str, attachments: List[Path]) -> bool:
+        payload = {"sender": {"name": self.email_from_name, "email": self.email_from},
+                   "to": [{"email": a} for a in self.email_to], "subject": subject, "htmlContent": body_html}
+        if attachments:
+            payload["attachment"] = [{"name": a.name, "content": base64.b64encode(a.read_bytes()).decode()}
+                                     for a in attachments]
+        req = urllib.request.Request(BREVO_URL, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"api-key": self.brevo_key, "Content-Type": "application/json",
+                                              "Accept": "application/json"})
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    resp.read()
+                return True
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")[:300]
+                if exc.code < 500:            # bad key, unverified sender, … — retrying will not help
+                    self.log.warning("brevo email rejected (HTTP %s): %s", exc.code, detail)
+                    return False
+                self.log.warning("brevo email failed (HTTP %s, attempt %d): %s", exc.code, attempt + 1, detail)
+            except Exception as exc:  # network trouble must never stop trading jobs
+                self.log.warning("brevo email failed (attempt %d): %s", attempt + 1, exc)
+            time.sleep(1.5 * (attempt + 1))
+        return False
+
+    def _smtp(self, subject: str, body_html: str, attachments: List[Path]) -> bool:
         msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = self.gmail_user
-        msg["To"] = self.gmail_to
+        msg["From"] = formataddr((self.email_from_name, self.email_from))
+        msg["To"] = ", ".join(self.email_to)
         msg.set_content("This message is best viewed as HTML.\n")
         msg.add_alternative(body_html, subtype="html")
         for a in attachments:
             msg.add_attachment(a.read_bytes(), maintype="application", subtype="pdf", filename=a.name)
+        ctx = ssl.create_default_context()
         try:
-            with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=ssl.create_default_context(),
-                                  timeout=30) as smtp:
-                smtp.login(self.gmail_user, self.gmail_password)
-                smtp.send_message(msg)
+            if self.smtp_port == 465:
+                with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, context=ctx, timeout=30) as smtp:
+                    smtp.login(self.smtp_user, self.smtp_password)
+                    smtp.send_message(msg)
+            else:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as smtp:
+                    smtp.starttls(context=ctx)
+                    smtp.login(self.smtp_user, self.smtp_password)
+                    smtp.send_message(msg)
             return True
         except Exception as exc:
-            self.log.warning("gmail send failed: %s", exc)
+            self.log.warning("smtp email via %s:%s failed: %s", self.smtp_host, self.smtp_port, exc)
             return False
 
     def _to_outbox(self, subject: str, tg_html: str, email_html: Optional[str], attachments: List[Path]) -> None:
