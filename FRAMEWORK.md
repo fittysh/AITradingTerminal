@@ -152,9 +152,12 @@ reports two things separately: whether every entry followed the seven steps and 
 requirements.
 
 ## Interpretation notes
-- The two TTrades articles (candle 2 closures, candle 3 closure) could not be opened from the build
-  environment (ttrades.com is not in its network allowlist). Steps 5 and 7 follow the fractal model as
-  commonly taught plus the annotated chart. Where a choice was needed:
+- Steps 5 and 7 were written from the fractal model as commonly taught plus the annotated chart, before
+  the two TTrades articles could be read. They were compared on 2026-11-17
+  ([docs/validation-2026-11-17.md](docs/validation-2026-11-17.md), section 6): the C2 closure matches;
+  the articles define the C3 closure against C2's body (not C1's low), require a higher-timeframe point
+  of interest where C2 forms, and add equilibrium filters. The rules here are unchanged until the owner
+  decides. Where a choice was needed:
   - "back inside C1's range" = a close beyond C1's low (high for shorts); closing beyond C1's other
     extreme counts too;
   - a series can be a single candle;

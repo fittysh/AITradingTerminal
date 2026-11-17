@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import run_bot  # noqa: E402
 import timeutil as tu  # noqa: E402
-from exchange import BitgetPublic, closed_only, tf_ms  # noqa: E402
+from exchange import BitgetPublic, bucket, closed_only  # noqa: E402
 from sim import SimClock, SimMarket  # noqa: E402
 from store import Paths, Store  # noqa: E402
 
@@ -22,7 +22,8 @@ DAYS, SEED = 2.0, 11
 
 
 class FakeBitget:
-    """Transport for BitgetPublic: /contracts and /history-candles answered from a SimMarket."""
+    """Transport for BitgetPublic: /contracts and /history-candles answered from a SimMarket. Like Bitget,
+    history-candles returns at most 200 bars, newest last, that open before the bar containing endTime."""
 
     def __init__(self, seed: int, start: int, end: int):
         self.clock = SimClock(start)
@@ -42,8 +43,9 @@ class FakeBitget:
         elif u.path.endswith("/history-candles"):
             limit, tf, end = int(q["limit"]), q["granularity"], int(q["endTime"])
             assert limit <= 200, "Bitget serves at most 200 history candles per request"
-            self.clock.set(end + tf_ms(tf))
-            rows = closed_only(self.sim.candles(q["symbol"], tf, limit + 1), tf, end + tf_ms(tf))[-limit:]
+            cut = bucket(end, tf)
+            self.clock.set(cut)
+            rows = closed_only(self.sim.candles(q["symbol"], tf, limit + 1), tf, cut)[-limit:]
             data = [[str(c.ts), repr(c.o), repr(c.h), repr(c.l), repr(c.c), "0", repr(c.v)] for c in rows]
         else:
             data = []
@@ -90,6 +92,23 @@ class HistoryReplay(unittest.TestCase):
 
     def test_full_coverage_reports_no_gaps(self):
         self.assertEqual(self.rep["gaps"], [])
+
+    def test_one_missing_candle_is_reported(self):
+        from sim import HistoricalMarket
+        end = END // (5 * tu.MIN) * (5 * tu.MIN)
+        start = end - int(DAYS * tu.DAY)
+        pub = BitgetPublic(transport=FakeBitget(SEED, start, end), rps=1e9)
+        real_history = pub.history
+
+        def holed(sym, tf, s, e):
+            rows = real_history(sym, tf, s, e)
+            return rows[:100] + rows[101:]                      # one bar missing, 0.1% of the history
+        pub.history = holed
+        with tempfile.TemporaryDirectory() as d:
+            md = HistoricalMarket(pub, SimClock(start), self.symbols[:1], start, end, Path(d))
+            md._fetch(self.symbols[0], "5m")
+            self.assertEqual(len(md.gaps), 1)
+            self.assertEqual(md.gaps[0]["expected"] - md.gaps[0]["candles"], 1)
 
     def test_short_history_is_reported(self):
         from sim import HistoricalMarket

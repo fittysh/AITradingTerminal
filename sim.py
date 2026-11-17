@@ -376,21 +376,23 @@ class HistoricalMarket(SeriesMarket):
         return rows
 
     def _coverage(self, sym: str, tf: str, start: int, rows: Sequence[Candle]) -> None:
-        """Record (and log) a history that starts late, ends early or misses more than 2% of its candles —
-        e.g. when Bitget does not serve that much history for a small timeframe."""
+        """Record (and log) every history that misses any closed candle of the window — a late start (coin
+        listed recently, or Bitget not serving that much history), an early end, or holes inside. The candle
+        still forming at the window's end is not expected."""
         step = tf_ms(tf)
-        want = max(1, (self.end - start) // step)
-        late = not rows or rows[0].ts > start + step
-        early = not rows or rows[-1].ts + 2 * step < self.end
-        thin = len(rows) < 0.98 * want
-        if late or early or thin:
-            gap = {"symbol": sym, "tf": tf, "wanted": [start, self.end], "candles": len(rows), "expected": want,
+        first = bucket(start, tf)
+        if first < start:
+            first += step
+        last = bucket(self.end, tf) - step                    # the last candle closed by the window's end
+        expected = (last - first) // step + 1 if last >= first else 0
+        got = sum(1 for c in rows if first <= c.ts <= last)
+        if got < expected:
+            gap = {"symbol": sym, "tf": tf, "wanted": [first, last], "candles": got, "expected": expected,
                    "from": rows[0].ts if rows else None, "to": rows[-1].ts if rows else None}
             self.gaps.append(gap)
             if self.log:
-                self.log.warning("history %s %s covers %s → %s with %d of %d candles (wanted %s → %s)", sym, tf,
-                                 tu.fmt(gap["from"]), tu.fmt(gap["to"]), len(rows), want, tu.fmt(start),
-                                 tu.fmt(self.end))
+                self.log.warning("history %s %s: %d of %d closed candles (%s → %s; wanted %s → %s)", sym, tf, got,
+                                 expected, tu.fmt(gap["from"]), tu.fmt(gap["to"]), tu.fmt(first), tu.fmt(last))
 
     def _load_base(self, sym: str) -> List[Candle]:
         return self._fetch(sym, BASE_TF)
