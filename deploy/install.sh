@@ -67,6 +67,7 @@ EOF
   exit 1
 fi
 chmod 600 "$ENV_FILE"
+sed -i '1s/^\xEF\xBB\xBF//; s/\r$//' "$ENV_FILE"       # a .env saved by Windows Notepad: drop the BOM and CRLF
 val() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r'; }
 MODE="$(val TRADING_MODE)"; MODE="${MODE:-paper}"
 echo "trading mode: $MODE"

@@ -71,6 +71,25 @@ class FakeHttp:
         return {"code": "00000", "msg": "success", "data": data}
 
 
+class DotEnv(unittest.TestCase):
+    def test_a_notepad_file_loads(self):
+        """Windows Notepad: byte-order mark, CRLF line endings, quotes, spaces in the Gmail app password."""
+        import config
+        keys = ("AITT_T_FIRST", "AITT_T_QUOTED", "AITT_T_SPACED")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / ".env"
+            path.write_bytes("\ufeffAITT_T_FIRST=123:abc\r\n# comment\r\nAITT_T_QUOTED=\"x y\"\r\n"
+                             "AITT_T_SPACED=abcd efgh ijkl mnop\r\n".encode("utf-8"))
+            try:
+                config._load_dotenv(path)
+                self.assertEqual(os.environ["AITT_T_FIRST"], "123:abc")
+                self.assertEqual(os.environ["AITT_T_QUOTED"], "x y")
+                self.assertEqual(os.environ["AITT_T_SPACED"], "abcd efgh ijkl mnop")
+            finally:
+                for k in keys:
+                    os.environ.pop(k, None)
+
+
 class Bitget(unittest.TestCase):
     def test_public_parsing(self):
         http = FakeHttp({

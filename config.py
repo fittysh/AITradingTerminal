@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent
 def _load_dotenv(path: Path) -> None:
     if not path.is_file():
         return
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig drops the byte-order mark Windows Notepad may write; splitlines/strip handle CRLF endings
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -134,7 +135,7 @@ SIGNALS_MAX_AGE_H = _env("SIGNALS_MAX_AGE_H", 8.0, float)   # trade ignores a st
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
 GMAIL_USER = _env("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = _env("GMAIL_APP_PASSWORD", "")
+GMAIL_APP_PASSWORD = _env("GMAIL_APP_PASSWORD", "").replace(" ", "")   # Google shows it as 4 groups of 4
 GMAIL_TO = _env("GMAIL_TO", "")
 SMTP_HOST = _env("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = _env("SMTP_PORT", 465, int)
